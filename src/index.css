@@ -1,0 +1,26 @@
+/* dus-frontend/src/index.css */
+
+/**
+ * ============================================
+ * INDEX.CSS - Legacy File (Deprecated)
+ * ============================================
+ * 
+ * PURPOSE:
+ * This file is intentionally empty/removed because:
+ * - All styles are now handled in App.css
+ * - App.css imports Tailwind and all custom styles
+ * - Keeping both files would cause duplicate styles
+ * 
+ * WHAT TO DO:
+ * - Delete this file
+ * - Ensure App.css is imported in main.jsx
+ * 
+ * WHY:
+ * - Single source of truth for styles
+ * - Easier maintenance
+ * - Prevents style conflicts
+ * ============================================
+ */
+
+/* All styles have been moved to App.css */
+/* Delete this file and import App.css in main.jsx instead */
