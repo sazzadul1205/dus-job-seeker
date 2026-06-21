@@ -1,16 +1,15 @@
-// resources/js/Pages/Backend/Apply/Show.jsx
+// src/pages/Applications/ApplicationShow.jsx
 
 // React
-import { useState, useEffect } from 'react';
-
-// Inertia
-import { Head, router, Link } from '@inertiajs/react';
+import { Helmet } from 'react-helmet-async';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 
 // Layout
-import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
-// Auth
-import { useAuth } from '../../../hooks/useAuth';
+// Axios
+import axios from 'axios';
 
 // Icons
 import {
@@ -44,114 +43,76 @@ import {
 // SweetAlert
 import Swal from 'sweetalert2';
 
-export default function ApplyShow({ application, jobListing, statusTimeline, atsDetails, atsStatus, isDeleted }) {
-  // Use centralized auth hook
-  const {
-    user: currentUser,
-    isAuthenticated,
-    hasRole,
-    hasAnyPermission,
-  } = useAuth();
+export default function ApplicationShow() {
+  const navigate = useNavigate();
+  const { id } = useParams();
 
-  // Check permissions
-  // Check permissions - FIXED: Use correct permission slugs
-  const isJobSeeker = hasRole('job-seeker') || hasRole('job_seeker');
-  // Check for both apply.* and applications.* permissions
-  const canViewAllApplications = hasAnyPermission([
-    'apply.view',
-    'apply.view.any',
-    'apply.show',
-    'applications.view',
-    'applications.manage'
-  ]);
-  const isAdmin = canViewAllApplications;
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
+  const token = localStorage.getItem('token');
 
-  // Check if user is the owner of this application
-  const isOwner = currentUser?.id === application?.user_id;
-
-  // Determine if user can view this application
-  const canView = isOwner || isAdmin;
-
-  // Loading state
+  // States
+  const [loading, setLoading] = useState(true);
+  const [application, setApplication] = useState(null);
+  const [jobListing, setJobListing] = useState(null);
+  const [statusTimeline, setStatusTimeline] = useState([]);
+  const [atsDetails, setAtsDetails] = useState(null);
+  const [atsStatus, setAtsStatus] = useState(null);
+  const [isDeleted, setIsDeleted] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
 
-  // If user is not authenticated, show access denied
-  if (!isAuthenticated) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaShieldAlt className="w-10 h-10 text-red-500" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
-            <p className="text-gray-500 mt-2">Please login to view application details.</p>
-            <button
-              onClick={() => router.visit(route('login', { redirect: route('backend.apply.show', application?.id) }))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Login Now
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+  // Check permissions
+  const isJobSeeker = user?.roles?.some(r => r.slug === 'job-seeker');
+  const isAdmin = user?.permissions?.includes('applications.manage');
+  const isOwner = user?.id === application?.user_id;
+  const canView = isOwner || isAdmin;
 
-  // If user doesn't have permission to view this application, show access denied
-  if (!canView) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaShieldAlt className="w-10 h-10 text-red-500" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Access Denied</h2>
-            <p className="text-gray-500 mt-2">
-              You don't have permission to view this application.
-            </p>
-            <button
-              onClick={() => router.visit(route('backend.apply.index'))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Back to Applications
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+  // Fetch data
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/applications/${id}`, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
 
-  // If user is employer (not job seeker) and not admin, show message
-  if (!isJobSeeker && !isAdmin) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center max-w-md mx-auto p-6">
-            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaBriefcase className="w-10 h-10 text-yellow-600" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Employer Account</h2>
-            <p className="text-gray-500 mt-2">
-              Employer accounts cannot view application details. Please use the employer panel to manage applications for your jobs.
-            </p>
-            <button
-              onClick={() => router.visit(route('backend.dashboard'))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Go to Dashboard
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+      const data = response.data;
+      setTimeout(() => {
+        setApplication(data.application);
+        setJobListing(data.jobListing);
+        setStatusTimeline(data.statusTimeline || []);
+        setAtsDetails(data.atsDetails || null);
+        setAtsStatus(data.atsStatus || null);
+        setIsDeleted(data.isDeleted || false);
+        setLoading(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching application:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+        setLoading(false);
+        navigate('/applications');
+      }, 0);
+    }
+  }, [id, token, navigate]);
+
+  // Initial fetch
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchData();
+    }
+  }, [isAuthenticated, fetchData]);
 
   // Format dates
   const formatDate = (date) => {
@@ -165,7 +126,6 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
     });
   };
 
-  // Format short dates
   const formatShortDate = (date) => {
     if (!date) return 'N/A';
     return new Date(date).toLocaleDateString('en-US', {
@@ -186,7 +146,6 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
     return badges[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // Get status icon
   const getStatusIcon = (status) => {
     const icons = {
       pending: <FaHourglassHalf className="text-yellow-500" size={24} />,
@@ -197,7 +156,6 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
     return icons[status] || <FaBriefcase className="text-gray-500" size={24} />;
   };
 
-  // Get status text
   const getStatusText = (status) => {
     const texts = {
       pending: 'Pending Review',
@@ -217,16 +175,6 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
     return 'text-red-600';
   };
 
-  // Get ATS score background
-  const getAtsScoreBg = (score) => {
-    if (!score) return 'bg-gray-100';
-    if (score >= 80) return 'bg-green-100';
-    if (score >= 60) return 'bg-blue-100';
-    if (score >= 40) return 'bg-yellow-100';
-    return 'bg-red-100';
-  };
-
-  // Get ATS score message
   const getAtsScoreMessage = (score) => {
     if (!score) return 'Not calculated yet';
     if (score >= 80) return 'Excellent match! Your CV aligns very well with this position.';
@@ -261,13 +209,20 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
       cancelButtonColor: '#d33',
       confirmButtonText: 'Yes, recalculate',
       cancelButtonText: 'Cancel',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setRecalculating(true);
 
-        router.post(route('backend.apply.recalculate-ats', application.id), {}, {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.post(`/api/applications/${id}/recalculate-ats`, {}, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: 'Recalculated!',
@@ -275,18 +230,20 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
               timer: 1500,
               showConfirmButton: false,
             });
-            router.reload();
-          },
-          onError: (errors) => {
+            fetchData();
+            setRecalculating(false);
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
             Swal.fire({
               icon: 'error',
               title: 'Recalculation Failed',
-              text: errors?.message || 'Failed to recalculate ATS score.',
+              text: error.response?.data?.message || 'Failed to recalculate ATS score.',
               confirmButtonColor: '#d33',
             });
-          },
-          onFinish: () => setRecalculating(false),
-        });
+            setRecalculating(false);
+          }, 0);
+        }
       }
     });
   };
@@ -311,13 +268,20 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
       cancelButtonColor: '#3085d6',
       confirmButtonText: 'Yes, withdraw',
       cancelButtonText: 'Cancel',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setWithdrawing(true);
 
-        router.delete(route('backend.apply.destroy', application.id), {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.delete(`/api/applications/${id}`, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: 'Withdrawn!',
@@ -325,18 +289,20 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
               timer: 1500,
               showConfirmButton: false,
             });
-            router.get(route('backend.apply.index'));
-          },
-          onError: (errors) => {
+            navigate('/applications');
+            setWithdrawing(false);
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
             Swal.fire({
               icon: 'error',
               title: 'Withdraw Failed',
-              text: errors?.message || 'Failed to withdraw application.',
+              text: error.response?.data?.message || 'Failed to withdraw application.',
               confirmButtonColor: '#d33',
             });
-          },
-          onFinish: () => setWithdrawing(false),
-        });
+            setWithdrawing(false);
+          }, 0);
+        }
       }
     });
   };
@@ -361,13 +327,20 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
       cancelButtonColor: '#3085d6',
       confirmButtonText: 'Yes, restore',
       cancelButtonText: 'Cancel',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setRestoring(true);
 
-        router.post(route('backend.apply.restore', application.id), {}, {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.post(`/api/applications/${id}/restore`, {}, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: 'Restored!',
@@ -375,18 +348,20 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
               timer: 1500,
               showConfirmButton: false,
             });
-            router.get(route('backend.apply.index'));
-          },
-          onError: (errors) => {
+            navigate('/applications');
+            setRestoring(false);
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
             Swal.fire({
               icon: 'error',
               title: 'Restore Failed',
-              text: errors?.message || 'Failed to restore application.',
+              text: error.response?.data?.message || 'Failed to restore application.',
               confirmButtonColor: '#d33',
             });
-          },
-          onFinish: () => setRestoring(false),
-        });
+            setRestoring(false);
+          }, 0);
+        }
       }
     });
   };
@@ -411,11 +386,18 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
       cancelButtonColor: '#3085d6',
       confirmButtonText: 'Yes, delete permanently',
       cancelButtonText: 'Cancel',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
-        router.delete(route('backend.apply.force-delete', application.id), {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.delete(`/api/applications/${id}/force`, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: 'Deleted!',
@@ -423,42 +405,145 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
               timer: 1500,
               showConfirmButton: false,
             });
-            router.get(route('backend.apply.index'));
-          },
-          onError: (errors) => {
+            navigate('/applications');
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
             Swal.fire({
               icon: 'error',
               title: 'Delete Failed',
-              text: errors?.message || 'Failed to delete application.',
+              text: error.response?.data?.message || 'Failed to delete application.',
               confirmButtonColor: '#d33',
             });
-          },
-        });
+          }, 0);
+        }
       }
     });
   };
 
   // Determine if user can edit this application
-  const canEdit = !isDeleted && application.status === 'pending' && (isOwner || isAdmin);
+  const canEdit = !isDeleted && application?.status === 'pending' && (isOwner || isAdmin);
 
   // Determine if user can withdraw this application
-  const canWithdraw = !isDeleted && application.status === 'pending' && isOwner;
+  const canWithdraw = !isDeleted && application?.status === 'pending' && isOwner;
 
   // Determine if user can restore this application
   const canRestore = isDeleted && (isOwner || isAdmin);
 
-  // Determine if user can force delete this application
+  // Determine if user can recalculate ATS
   const canRecalculate = !isDeleted && atsStatus?.can_recalculate && (isOwner || isAdmin);
 
+  // If user is not authenticated
+  if (!isAuthenticated) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaShieldAlt className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
+            <p className="text-gray-500 mt-2">Please login to view application details.</p>
+            <Link
+              to={`/login?redirect=/applications/${id}`}
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Login Now
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // Loading state
+  if (loading) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Loading Application...</title>
+        </Helmet>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-gray-500 mt-4">Loading application details...</p>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user doesn't have permission to view this application
+  if (!canView) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaShieldAlt className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Access Denied</h2>
+            <p className="text-gray-500 mt-2">
+              You don't have permission to view this application.
+            </p>
+            <Link
+              to="/applications"
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Back to Applications
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user is employer (not job seeker) and not admin
+  if (!isJobSeeker && !isAdmin) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto p-6">
+            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaBriefcase className="w-10 h-10 text-yellow-600" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Employer Account</h2>
+            <p className="text-gray-500 mt-2">
+              Employer accounts cannot view application details. Please use the employer panel to manage applications for your jobs.
+            </p>
+            <Link
+              to="/dashboard"
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Go to Dashboard
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
   return (
-    <AuthenticatedLayout>
-      <Head title={`Application for ${jobListing.title}`} />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>{`Application for ${jobListing?.title} - Job Match`}</title>
+        <meta name="description" content={`View application details for ${jobListing?.title}`} />
+      </Helmet>
 
       <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 py-8 px-4 sm:px-6 lg:px-8">
-        <div className=" mx-auto">
+        <div className="mx-auto">
           {/* Back Button */}
           <button
-            onClick={() => router.get(route('backend.apply.index'))}
+            onClick={() => navigate('/applications')}
             className="group flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6 transition-all duration-200"
           >
             <FaArrowLeft className="group-hover:-translate-x-1 transition-transform duration-200" size={14} />
@@ -474,14 +559,14 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                   <p className="text-blue-100 text-sm mt-1">Review your application information</p>
                   {isAdmin && !isOwner && (
                     <p className="text-blue-200 text-xs mt-2">
-                      👑 Admin view - Viewing application for {application.name}
+                      👑 Admin view - Viewing application for {application?.name}
                     </p>
                   )}
                 </div>
                 <div className="flex gap-2">
                   {canEdit && (
                     <Link
-                      href={route('backend.apply.edit', application.id)}
+                      to={`/applications/${id}/edit`}
                       className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg flex items-center gap-2 transition-all duration-200"
                     >
                       <FaEdit size={14} />
@@ -535,10 +620,10 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                 </div>
                 <div className="p-6">
                   <div className="flex items-center gap-4 mb-4">
-                    {getStatusIcon(application.status)}
+                    {application && getStatusIcon(application.status)}
                     <div>
-                      <span className={`inline-flex px-3 py-1 rounded-full text-sm font-semibold ${getStatusBadge(application.status)}`}>
-                        {getStatusText(application.status)}
+                      <span className={`inline-flex px-3 py-1 rounded-full text-sm font-semibold ${application ? getStatusBadge(application.status) : 'bg-gray-100 text-gray-600'}`}>
+                        {application ? getStatusText(application.status) : 'Unknown'}
                       </span>
                       {isDeleted && (
                         <span className="inline-flex px-3 py-1 rounded-full text-sm font-semibold bg-gray-200 text-gray-600 ml-2">
@@ -551,13 +636,13 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <p className="text-gray-500">Applied on</p>
-                      <p className="font-medium text-gray-900">{formatShortDate(application.created_at)}</p>
+                      <p className="font-medium text-gray-900">{application ? formatShortDate(application.created_at) : 'N/A'}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Last Updated</p>
-                      <p className="font-medium text-gray-900">{formatShortDate(application.updated_at)}</p>
+                      <p className="font-medium text-gray-900">{application ? formatShortDate(application.updated_at) : 'N/A'}</p>
                     </div>
-                    {isDeleted && application.deleted_at && (
+                    {isDeleted && application?.deleted_at && (
                       <div className="col-span-2">
                         <p className="text-gray-500">Withdrawn on</p>
                         <p className="font-medium text-red-600">{formatShortDate(application.deleted_at)}</p>
@@ -576,11 +661,11 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                   </h2>
                 </div>
                 <div className="p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-3">{jobListing.title}</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">{jobListing?.title}</h3>
                   <div className="grid grid-cols-2 gap-3 text-sm mb-4">
                     <div className="flex items-center gap-2 text-gray-600">
                       <FaBuilding size={14} />
-                      <span>{jobListing.employer?.name || 'Company'}</span>
+                      <span>{jobListing?.employer?.name || 'Company'}</span>
                     </div>
                     <div className="flex items-center gap-2 text-gray-600">
                       <FaMapMarkerAlt size={14} />
@@ -588,15 +673,15 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                     </div>
                     <div className="flex items-center gap-2 text-gray-600">
                       <FaCalendarAlt size={14} />
-                      <span>{jobListing.job_type}</span>
+                      <span>{jobListing?.job_type}</span>
                     </div>
                     <div className="flex items-center gap-2 text-gray-600">
                       <FaStar size={14} />
-                      <span>{jobListing.experience_level}</span>
+                      <span>{jobListing?.experience_level}</span>
                     </div>
                   </div>
 
-                  {jobListing.description && (
+                  {jobListing?.description && (
                     <div className="mt-4 pt-4 border-t border-gray-200">
                       <p className="text-sm font-medium text-gray-700 mb-2">Job Description</p>
                       <div className="text-sm text-gray-600 prose prose-sm max-w-none"
@@ -618,19 +703,19 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <p className="text-sm text-gray-500">Full Name</p>
-                      <p className="font-medium text-gray-900">{application.name}</p>
+                      <p className="font-medium text-gray-900">{application?.name}</p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500">Email Address</p>
-                      <p className="font-medium text-gray-900">{application.email}</p>
+                      <p className="font-medium text-gray-900">{application?.email}</p>
                     </div>
-                    {application.phone && (
+                    {application?.phone && (
                       <div>
                         <p className="text-sm text-gray-500">Phone Number</p>
                         <p className="font-medium text-gray-900">{application.phone}</p>
                       </div>
                     )}
-                    {application.expected_salary && (
+                    {application?.expected_salary && (
                       <div>
                         <p className="text-sm text-gray-500">Expected Salary</p>
                         <p className="font-medium text-green-600">{formatSalary(application.expected_salary)}</p>
@@ -639,11 +724,11 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                   </div>
 
                   {/* Social Links */}
-                  {(application.linkedin_link || application.facebook_link) && (
+                  {(application?.linkedin_link || application?.facebook_link) && (
                     <div className="mt-4 pt-4 border-t border-gray-200">
                       <p className="text-sm font-medium text-gray-700 mb-2">Social Profiles</p>
                       <div className="flex gap-4">
-                        {application.linkedin_link && (
+                        {application?.linkedin_link && (
                           <a
                             href={application.linkedin_link}
                             target="_blank"
@@ -654,7 +739,7 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                             <span className="text-sm">LinkedIn</span>
                           </a>
                         )}
-                        {application.facebook_link && (
+                        {application?.facebook_link && (
                           <a
                             href={application.facebook_link}
                             target="_blank"
@@ -670,7 +755,7 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                   )}
 
                   {/* Resume Link */}
-                  {application.resume_url && (
+                  {application?.resume_url && (
                     <div className="mt-4 pt-4 border-t border-gray-200">
                       <a
                         href={application.resume_url}
@@ -807,18 +892,18 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                     </div>
                   ) : (
                     <div className="text-center py-8">
-                      {application.ats_calculation_status === 'pending' ? (
+                      {application?.ats_calculation_status === 'pending' ? (
                         <>
                           <FaSpinner className="animate-spin text-purple-600 text-3xl mx-auto mb-3" />
                           <p className="text-gray-600">ATS score is being calculated...</p>
                           <p className="text-xs text-gray-400 mt-2">This may take a few moments</p>
                         </>
-                      ) : application.ats_calculation_status === 'processing' ? (
+                      ) : application?.ats_calculation_status === 'processing' ? (
                         <>
                           <FaSpinner className="animate-spin text-purple-600 text-3xl mx-auto mb-3" />
                           <p className="text-gray-600">Processing your CV...</p>
                         </>
-                      ) : application.ats_calculation_status === 'failed' ? (
+                      ) : application?.ats_calculation_status === 'failed' ? (
                         <>
                           <FaTimesCircle className="text-red-500 text-3xl mx-auto mb-3" />
                           <p className="text-gray-600">ATS calculation failed</p>
@@ -856,7 +941,7 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
               </div>
 
               {/* Quick Actions Card */}
-              {!isDeleted && (canEdit || canWithdraw || application.resume_url) && (
+              {!isDeleted && (canEdit || canWithdraw || application?.resume_url) && (
                 <div className="bg-white rounded-xl shadow-md overflow-hidden">
                   <div className="px-6 py-4 bg-linear-to-r from-gray-700 to-gray-800">
                     <h3 className="font-semibold text-white flex items-center gap-2">
@@ -867,7 +952,7 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                   <div className="p-4 space-y-2">
                     {canEdit && (
                       <Link
-                        href={route('backend.apply.edit', application.id)}
+                        to={`/applications/${id}/edit`}
                         className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition-all duration-200"
                       >
                         <FaEdit className="text-blue-600" size={16} />
@@ -878,7 +963,7 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
                       </Link>
                     )}
 
-                    {application.resume_url && (
+                    {application?.resume_url && (
                       <a
                         href={application.resume_url}
                         target="_blank"
@@ -910,7 +995,7 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
               )}
 
               {/* Employer Notes */}
-              {application.employer_notes && (
+              {application?.employer_notes && (
                 <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
                   <div className="flex items-start gap-2">
                     <FaInfoCircle className="text-yellow-600 mt-0.5 shrink-0" size={16} />
@@ -942,6 +1027,6 @@ export default function ApplyShow({ application, jobListing, statusTimeline, ats
           animation: fade-in 0.3s ease-out;
         }
       `}</style>
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

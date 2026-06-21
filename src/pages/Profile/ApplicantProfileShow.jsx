@@ -1,22 +1,19 @@
-// pages/Backend/ApplicantProfile/Show.jsx
+// src/pages/Profile/ApplicantProfileShow.jsx
 
 // React
-import { useState } from 'react';
-
-// Inertia
-import { Head, Link, router, usePage } from '@inertiajs/react';
+import { useState, useEffect, useMemo } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 
 // Layout
-import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
-// Auth
-import { useAuth } from '../../../hooks/useAuth';
+// Axios
+import axios from 'axios';
 
 // Icons
-import { FaCakeCandles } from "react-icons/fa6";
 import {
   FaUser,
-  FaEnvelope,
   FaPhone,
   FaEdit,
   FaTrash,
@@ -39,7 +36,6 @@ import {
   FaGlobe,
   FaCalendarAlt,
   FaStar,
-  FaPlus,
   FaFacebook,
   FaYoutube,
   FaMedium,
@@ -48,11 +44,7 @@ import {
   FaChartLine,
   FaUserTie,
   FaLink,
-  FaCheckCircle,
-  FaClock,
-  FaGraduationCap,
   FaBuilding,
-  FaCalendarDay,
   FaInfoCircle,
   FaArrowLeft,
   FaShieldAlt,
@@ -61,7 +53,6 @@ import {
   MdOutlineBloodtype,
   MdSchool,
   MdPending,
-  MdVerified,
   MdEmail
 } from 'react-icons/md';
 
@@ -77,47 +68,107 @@ import WorkExperienceModal from './Modals/WorkExperienceModal';
 import ChangePasswordModal from './Modals/ChangePasswordModal';
 import ProfessionalInfoModal from './Modals/ProfessionalInfoModal';
 
-export default function Show({ profile, canEdit = false, canDelete = false }) {
-  // Use centralized auth hook
-  const {
-    user: authUser,
-    isAuthenticated,
-    hasAnyPermission,
-    hasRole,
-  } = useAuth();
+export default function ApplicantProfileShow() {
+  const navigate = useNavigate();
+  const { id } = useParams();
 
-  // Check if user is OAuth user (Google login)
-  const isOauthUser = !!authUser?.google_id;
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
+  const token = localStorage.getItem('token');
 
-  // Check permissions using the auth hook
-  const isAdmin = hasRole('admin');
-  const isSuperAdmin = hasRole('super-admin');
-  const canViewAllProfiles = hasAnyPermission(['applicant-profiles.view', 'applicant-profiles.manage']);
-  const canEditAnyProfile = hasAnyPermission(['applicant-profiles.update', 'applicant-profiles.manage']);
-  const canDeleteAnyProfile = hasAnyPermission(['applicant-profiles.destroy', 'applicant-profiles.manage']);
-
-  // Check if current user is the profile owner
-  const isOwner = authUser?.id === profile?.user_id;
-
-  // Check if user has admin role for viewing/editing other profiles
-  const hasAdminRole = isSuperAdmin || isAdmin || canViewAllProfiles || canEditAnyProfile;
-
-  // State
+  // States
+  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [restoring, setRestoring] = useState(false);
-
-  // Base path for profile images
-  const baseProfilePath = '/backend/applicant/profile';
   const [activeModal, setActiveModal] = useState(null);
-  const isDeleted = profile?.deleted_at !== null;
 
-  // If user doesn't have permission to view this profile and isn't the owner, show access denied
+  // Check permissions
+  const isAdmin = user?.roles?.some(r => r.slug === 'admin');
+  const isSuperAdmin = user?.roles?.some(r => r.slug === 'super-admin');
+  const isOwner = user?.id === profile?.user_id;
+  const canViewAllProfiles = user?.permissions?.includes('applicant-profiles.view') || user?.permissions?.includes('applicant-profiles.manage');
+  const canEditAnyProfile = user?.permissions?.includes('applicant-profiles.update') || user?.permissions?.includes('applicant-profiles.manage');
+  const canDeleteAnyProfile = user?.permissions?.includes('applicant-profiles.destroy') || user?.permissions?.includes('applicant-profiles.manage');
+
+  const hasAdminRole = isSuperAdmin || isAdmin || canViewAllProfiles || canEditAnyProfile;
+  const isDeleted = profile?.deleted_at !== null;
+  const isOauthUser = !!user?.google_id;
+
+  // Fetch profile data
+  const fetchProfile = useMemo(() => async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/applicant-profiles/${id}`, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
+
+      setTimeout(() => {
+        setProfile(response.data);
+        setLoading(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load profile',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+        setLoading(false);
+        navigate('/profile');
+      }, 0);
+    }
+  }, [id, token, navigate]);
+
+  // Initial fetch
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchProfile();
+    }
+  }, [isAuthenticated, id, fetchProfile]);
+
+  // If user is not authenticated
+  if (!isAuthenticated) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaShieldAlt className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
+            <p className="text-gray-500 mt-2">Please login to view this profile.</p>
+            <Link
+              to={`/login?redirect=/profile/${id}`}
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Login Now
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user doesn't have permission
   if (!isOwner && !hasAdminRole) {
     return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center bg-gray-50 px-4">
           <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
             <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <FaShieldAlt className="text-red-500 text-4xl" />
@@ -126,11 +177,55 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
             <p className="text-gray-600">You don't have permission to view this profile.</p>
           </div>
         </div>
-      </AuthenticatedLayout>
+      </JobSeekerLayout>
     );
   }
 
-  // Function to format date
+  // Loading state
+  if (loading) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Loading Profile...</title>
+        </Helmet>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-gray-500 mt-4">Loading profile...</p>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If no profile
+  if (!profile) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>My Profile</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center bg-gray-50 px-4">
+          <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
+            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaUserCircle className="text-gray-400 text-5xl" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">No Profile Found</h2>
+            <p className="text-gray-600 mb-6">You haven't created a profile yet. Create one to apply for jobs.</p>
+            <Link
+              to="/profile/create"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              <FaPlusCircle size={18} />
+              Create Profile
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // Helper functions
   const formatDate = (date) => {
     if (!date) return 'Not specified';
     return new Date(date).toLocaleDateString('en-US', {
@@ -140,7 +235,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
     });
   };
 
-  // Function to calculate age
   const calculateAge = (birthDate) => {
     if (!birthDate) return null;
     const today = new Date();
@@ -153,7 +247,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
     return age;
   };
 
-  // Open modal
   const openModal = (modalType) => {
     if (!isOwner) {
       Swal.fire({
@@ -176,12 +269,12 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
     setActiveModal(modalType);
   };
 
-  // Close modal
   const closeModal = () => {
     setActiveModal(null);
+    fetchProfile();
   };
 
-  // Delete profile Handler
+  // Delete handler
   const handleDelete = () => {
     if (!isOwner && !canDeleteAnyProfile) {
       Swal.fire({
@@ -205,18 +298,15 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
       if (result.isConfirmed) {
         setDeleting(true);
         try {
-          const response = await fetch(`${baseProfilePath}/${profile.id}`, {
-            method: 'DELETE',
+          await axios.delete(`/api/applicant-profiles/${profile.id}`, {
             headers: {
-              'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
               'X-Requested-With': 'XMLHttpRequest',
-              'Accept': 'application/json'
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
             }
           });
 
-          const data = await response.json();
-
-          if (data.success) {
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: 'Deleted!',
@@ -224,30 +314,29 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
               timer: 2000,
               showConfirmButton: false
             });
+            setDeleting(false);
 
-            // If admin deleted someone else's profile, redirect back to list
             if (!isOwner && hasAdminRole) {
-              router.visit(route('backend.applicant-profile.index'));
+              navigate('/profiles');
             } else {
-              router.reload();
+              fetchProfile();
             }
-          } else {
-            throw new Error(data.message || 'Failed to delete');
-          }
+          }, 0);
         } catch (error) {
-          Swal.fire({
-            icon: 'error',
-            title: 'Error!',
-            text: error.message || 'Failed to delete profile.',
-          });
-        } finally {
-          setDeleting(false);
+          setTimeout(() => {
+            Swal.fire({
+              icon: 'error',
+              title: 'Error!',
+              text: error.response?.data?.message || 'Failed to delete profile.',
+            });
+            setDeleting(false);
+          }, 0);
         }
       }
     });
   };
 
-  // Restore profile Handler
+  // Restore handler
   const handleRestore = () => {
     if (!isOwner && !canDeleteAnyProfile) {
       Swal.fire({
@@ -271,18 +360,15 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
       if (result.isConfirmed) {
         setRestoring(true);
         try {
-          const response = await fetch(`${baseProfilePath}/${profile.user_id}/restore`, {
-            method: 'POST',
+          await axios.post(`/api/applicant-profiles/${profile.user_id}/restore`, {}, {
             headers: {
-              'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
               'X-Requested-With': 'XMLHttpRequest',
-              'Accept': 'application/json'
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
             }
           });
 
-          const data = await response.json();
-
-          if (data.success) {
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: 'Restored!',
@@ -290,91 +376,48 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
               timer: 1500,
               showConfirmButton: false
             });
+            setRestoring(false);
 
-            // If admin restored someone else's profile, redirect back to list
             if (!isOwner && hasAdminRole) {
-              router.visit(route('backend.applicant-profile.index'));
+              navigate('/profiles');
             } else {
-              router.reload();
+              fetchProfile();
             }
-          } else {
-            throw new Error(data.message || 'Failed to restore');
-          }
+          }, 0);
         } catch (error) {
-          Swal.fire({
-            icon: 'error',
-            title: 'Error!',
-            text: error.message || 'Failed to restore profile.',
-          });
-        } finally {
-          setRestoring(false);
+          setTimeout(() => {
+            Swal.fire({
+              icon: 'error',
+              title: 'Error!',
+              text: error.response?.data?.message || 'Failed to restore profile.',
+            });
+            setRestoring(false);
+          }, 0);
         }
       }
     });
   };
 
-  // Go back 
-  const handleGoBack = () => {
-    // Check if there's a previous page in history
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      // Fallback to profiles list
-      router.visit(route('backend.applicant-profile.index'));
-    }
-  };
-
-  // Check if profile exists
-  if (!profile) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="My Profile" />
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-          <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
-            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaUserCircle className="text-gray-400 text-5xl" />
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">No Profile Found</h2>
-            <p className="text-gray-600 mb-6">You haven't created a profile yet. Create one to apply for jobs.</p>
-            <Link
-              href={route('backend.applicant.profile.create')}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              <FaPlusCircle size={18} />
-              Create Profile
-            </Link>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
-
-  // Calculate age
   const age = calculateAge(profile?.birth_date);
-
-  // Get profile stats
   const stats = profile?.stats || {};
-
-  // Determine if user can edit this profile
   const canEditProfile = isOwner || canEditAnyProfile;
-
-  // Determine if user can delete/restore this profile
   const hasAdminAccess = !isOwner && (canDeleteAnyProfile || hasAdminRole);
 
   return (
-    <AuthenticatedLayout>
-      <Head title={`${profile.first_name} ${profile.last_name} - Profile`} />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>{`${profile.first_name} ${profile.last_name} - Profile`}</title>
+        <meta name="description" content={`Profile of ${profile.first_name} ${profile.last_name}`} />
+      </Helmet>
 
       <div className="min-h-screen bg-gray-50 py-8">
-        <div className=" mx-auto px-4 sm:px-6 lg:px-8">
-
-          {/* Header with Back Button for Admin */}
+        <div className="mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Header */}
           <div className="mb-6">
-            {/* Back button for admin view */}
             {!isOwner && hasAdminRole && (
               <div className="mb-4">
                 <button
-                  onClick={handleGoBack}
+                  onClick={() => navigate('/profiles')}
                   className="inline-flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200 group"
                 >
                   <FaArrowLeft className="group-hover:-translate-x-1 transition-transform duration-200" size={16} />
@@ -396,7 +439,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                 )}
               </div>
               <div className="flex gap-3 flex-wrap">
-                {/* Change Password - Only show for profile owner (non-OAuth) */}
                 {!isDeleted && !isOauthUser && isOwner && (
                   <button
                     onClick={() => openModal('change-password')}
@@ -407,7 +449,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                   </button>
                 )}
 
-                {/* Restore/Delete buttons */}
                 {isDeleted ? (
                   <button
                     onClick={handleRestore}
@@ -419,10 +460,9 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                   </button>
                 ) : (
                   <>
-                    {/* Applications - Only show for profile owner */}
                     {isOwner && (
                       <Link
-                        href={route('backend.apply.index')}
+                        to="/applications"
                         className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
                       >
                         <FaFileAlt size={16} />
@@ -430,7 +470,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                       </Link>
                     )}
 
-                    {/* Delete button - Show for owner or admins */}
                     {(isOwner || hasAdminAccess) && (
                       <button
                         onClick={handleDelete}
@@ -473,13 +512,11 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
 
           {/* Main Profile Card */}
           <div className={`bg-white rounded-xl shadow-lg overflow-hidden ${isDeleted ? 'opacity-75' : ''}`}>
-
             {/* Banner */}
             <div className={`h-32 ${isDeleted ? 'bg-gray-400' : 'bg-linear-to-r from-blue-600 to-blue-700'}`} />
 
             {/* Content */}
             <div className="px-6 pb-6">
-
               {/* Profile Photo */}
               <div className="flex justify-center -mt-16 mb-4">
                 {profile.photo_url && !isDeleted && !imgError ? (
@@ -529,21 +566,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                     >
                       <FaEdit size={14} /> Edit
                     </button>
-                  )}
-                  {!isDeleted && !canEditProfile && (
-                    <div className="relative group">
-                      <button
-                        disabled
-                        className="text-gray-400 flex items-center gap-1 text-sm cursor-not-allowed"
-                      >
-                        <FaEdit size={14} /> Edit
-                      </button>
-                      <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-800 text-white text-xs rounded-lg py-1 px-2 whitespace-nowrap">
-                          You can only edit your own profile
-                        </div>
-                      </div>
-                    </div>
                   )}
                 </div>
 
@@ -614,21 +636,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                     >
                       <FaEdit size={14} /> Edit
                     </button>
-                  )}
-                  {!isDeleted && !canEditProfile && (
-                    <div className="relative group">
-                      <button
-                        disabled
-                        className="text-gray-400 flex items-center gap-1 text-sm cursor-not-allowed"
-                      >
-                        <FaEdit size={14} /> Edit
-                      </button>
-                      <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-800 text-white text-xs rounded-lg py-1 px-2 whitespace-nowrap">
-                          You can only edit your own profile
-                        </div>
-                      </div>
-                    </div>
                   )}
                 </div>
 
@@ -723,21 +730,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                       <FaEdit size={14} /> Edit
                     </button>
                   )}
-                  {!isDeleted && !canEditProfile && (
-                    <div className="relative group">
-                      <button
-                        disabled
-                        className="text-gray-400 flex items-center gap-1 text-sm cursor-not-allowed"
-                      >
-                        <FaEdit size={14} /> Edit
-                      </button>
-                      <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-800 text-white text-xs rounded-lg py-1 px-2 whitespace-nowrap">
-                          You can only edit your own profile
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
                 {profile.job_histories && profile.job_histories.length > 0 ? (
                   <div className="space-y-4">
@@ -787,21 +779,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                       <FaEdit size={14} /> Edit
                     </button>
                   )}
-                  {!isDeleted && !canEditProfile && (
-                    <div className="relative group">
-                      <button
-                        disabled
-                        className="text-gray-400 flex items-center gap-1 text-sm cursor-not-allowed"
-                      >
-                        <FaEdit size={14} /> Edit
-                      </button>
-                      <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-800 text-white text-xs rounded-lg py-1 px-2 whitespace-nowrap">
-                          You can only edit your own profile
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
                 {profile.education_histories && profile.education_histories.length > 0 ? (
                   <div className="space-y-4">
@@ -835,21 +812,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                     >
                       <FaEdit size={14} /> Edit
                     </button>
-                  )}
-                  {!isDeleted && !canEditProfile && (
-                    <div className="relative group">
-                      <button
-                        disabled
-                        className="text-gray-400 flex items-center gap-1 text-sm cursor-not-allowed"
-                      >
-                        <FaEdit size={14} /> Edit
-                      </button>
-                      <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-800 text-white text-xs rounded-lg py-1 px-2 whitespace-nowrap">
-                          You can only edit your own profile
-                        </div>
-                      </div>
-                    </div>
                   )}
                 </div>
                 {profile.achievements && profile.achievements.length > 0 ? (
@@ -888,21 +850,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
                     >
                       <FaEdit size={14} /> Manage CVs
                     </button>
-                  )}
-                  {!isDeleted && !canEditProfile && (
-                    <div className="relative group">
-                      <button
-                        disabled
-                        className="text-gray-400 flex items-center gap-1 text-sm cursor-not-allowed"
-                      >
-                        <FaEdit size={14} /> Manage CVs
-                      </button>
-                      <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10">
-                        <div className="bg-gray-800 text-white text-xs rounded-lg py-1 px-2 whitespace-nowrap">
-                          You can only manage your own CVs
-                        </div>
-                      </div>
-                    </div>
                   )}
                 </div>
                 {profile.cvs && profile.cvs.length > 0 ? (
@@ -962,7 +909,7 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
         </div>
       </div>
 
-      {/* Modals - Only render if user can edit the profile */}
+      {/* Modals */}
       {canEditProfile && (
         <>
           <BasicInfoModal
@@ -970,37 +917,31 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
             onClose={closeModal}
             profile={profile}
           />
-
           <ProfessionalInfoModal
             isOpen={activeModal === 'professional'}
             onClose={closeModal}
             profile={profile}
           />
-
           <WorkExperienceModal
             isOpen={activeModal === 'work'}
             onClose={closeModal}
             profile={profile}
           />
-
           <EducationModal
             isOpen={activeModal === 'education'}
             onClose={closeModal}
             profile={profile}
           />
-
           <AchievementsModal
             isOpen={activeModal === 'achievements'}
             onClose={closeModal}
             profile={profile}
           />
-
           <CVModal
             isOpen={activeModal === 'cv'}
             onClose={closeModal}
             profile={profile}
           />
-
           <ChangePasswordModal
             isOpen={activeModal === 'change-password'}
             onClose={closeModal}
@@ -1008,6 +949,6 @@ export default function Show({ profile, canEdit = false, canDelete = false }) {
           />
         </>
       )}
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

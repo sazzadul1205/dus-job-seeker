@@ -1,10 +1,9 @@
-// resources/js/Pages/Public/JobListings/Show.jsx
+// src/pages/Jobs/PublicJobListingShow.jsx
 
 // React
-import { useState, useEffect } from 'react';
-
-// Inertia
-import { Head, router, usePage } from '@inertiajs/react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 
 // Icons
 import {
@@ -38,44 +37,163 @@ import { FaListUl, FaListCheck } from "react-icons/fa6";
 import Swal from 'sweetalert2';
 
 // Layout
-import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
-// Auth
-import { useAuth } from '../../../hooks/useAuth';
-import { Can } from '../../../components/Auth/Can';
+// Axios
+import axios from 'axios';
 
-export default function PublicJobListingShow({
-  jobListing,
-  userData,
-  hasApplied,
-  relatedJobs,
-  applicationStats,
-  averageAtsScore,
-  isBookmarked: initialIsBookmarked = false,
-  bookmarkId: initialBookmarkId = null,
-}) {
-  // Use centralized auth hook
-  const {
-    user: currentUser,
-    isAuthenticated,
-    hasRole,
-    hasAnyPermission,
-  } = useAuth();
+// ==================== COMPONENTS ====================
 
-  // Check user roles/permissions
-  const isSuperAdmin = hasRole('super-admin');
-  const isEmployer = hasRole('employer') || hasRole('employer-admin');
-  const canManageJobs = hasAnyPermission(['jobs.manage', 'jobs.update']);
+// Info Section Component
+const InfoSection = ({ title, icon: Icon, children, badge }) => (
+  <div className="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden border border-gray-100">
+    <div className="flex items-center justify-between px-6 py-4 bg-linear-to-r from-gray-50/50 to-white border-b border-gray-100">
+      <div className="flex items-center gap-2.5">
+        <div className="p-1.5 bg-blue-50 rounded-lg">
+          <Icon className="text-blue-600" size={16} />
+        </div>
+        <h2 className="font-semibold text-gray-900">{title}</h2>
+      </div>
+      {badge && badge}
+    </div>
+    <div className="p-6">{children}</div>
+  </div>
+);
 
-  // Check if current user owns this job
-  const isJobOwner = isEmployer && currentUser?.employer_id === jobListing?.employer_id;
+// Info Row Component
+const InfoRow = ({ label, value, isHtml = false }) => (
+  <div className="py-3 first:pt-0 last:pb-0 border-b border-gray-100 last:border-0">
+    <dt className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">{label}</dt>
+    <dd className="text-gray-800">
+      {isHtml ? (
+        <div dangerouslySetInnerHTML={{ __html: value }} className="prose prose-sm max-w-none" />
+      ) : (
+        value || <span className="text-gray-400 italic">Not provided</span>
+      )}
+    </dd>
+  </div>
+);
+
+// Tag List Component
+const TagList = ({ items, color = 'blue' }) => {
+  const colorClasses = {
+    blue: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
+    green: 'bg-green-50 text-green-700 ring-1 ring-green-200',
+    purple: 'bg-purple-50 text-purple-700 ring-1 ring-purple-200',
+    amber: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items?.length > 0 ? (
+        items.map((item, index) => (
+          <span
+            key={index}
+            className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${colorClasses[color] || colorClasses.blue}`}
+          >
+            {item}
+          </span>
+        ))
+      ) : (
+        <span className="text-gray-400 italic text-sm">None provided</span>
+      )}
+    </div>
+  );
+};
+
+// Stat Card Component
+const StatCard = ({ title, value, color, icon: Icon, subtitle }) => {
+  const colorClasses = {
+    blue: 'from-blue-50 to-sky-50 ring-blue-100',
+    purple: 'from-purple-50 to-fuchsia-50 ring-purple-100',
+    indigo: 'from-indigo-50 to-blue-50 ring-indigo-100',
+    gray: 'from-gray-50 to-slate-50 ring-gray-100',
+  };
+  return (
+    <div className="bg-linear-to-br rounded-xl p-4 text-center transition-all duration-300 hover:scale-105 ring-1 ring-gray-100 shadow-sm hover:shadow-md">
+      <div className={`inline-flex items-center justify-center w-10 h-10 rounded-full bg-linear-to-br ${colorClasses[color]} mb-2.5`}>
+        <Icon className={`text-${color === 'blue' ? 'blue' : color === 'purple' ? 'purple' : color === 'indigo' ? 'indigo' : 'gray'}-600`} size={16} />
+      </div>
+      <h3 className="text-xl font-bold text-gray-900">{value}</h3>
+      <p className="text-xs text-gray-500 mt-1">{title}</p>
+      {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+    </div>
+  );
+};
+
+// ==================== MAIN COMPONENT ====================
+
+export default function PublicJobListingShow() {
+  const navigate = useNavigate();
+  const { slug } = useParams();
+  const isInitialMount = useRef(true);
+
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
+  const token = localStorage.getItem('token');
 
   // States
+  const [loading, setLoading] = useState(true);
+  const [jobListing, setJobListing] = useState(null);
+  const [hasApplied, setHasApplied] = useState(false);
+  const [relatedJobs, setRelatedJobs] = useState([]);
+  const [applicationStats, setApplicationStats] = useState({ total: 0 });
+  const [averageAtsScore, setAverageAtsScore] = useState(null);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [bookmarkId, setBookmarkId] = useState(null);
   const [isApplying, setIsApplying] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [isSavingBookmark, setIsSavingBookmark] = useState(false);
-  const [bookmarkId, setBookmarkId] = useState(initialBookmarkId);
-  const [isBookmarked, setIsBookmarked] = useState(initialIsBookmarked);
+
+  // Fetch job data
+  const fetchJobData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/jobs/${slug}`, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
+
+      const data = response.data;
+
+      // Use setTimeout to avoid cascading renders
+      setTimeout(() => {
+        setJobListing(data.jobListing);
+        setHasApplied(data.hasApplied || false);
+        setRelatedJobs(data.relatedJobs || []);
+        setApplicationStats(data.applicationStats || { total: 0 });
+        setAverageAtsScore(data.averageAtsScore || null);
+        setIsBookmarked(data.isBookmarked || false);
+        setBookmarkId(data.bookmarkId || null);
+        setLoading(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching job:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load job',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+        setLoading(false);
+        navigate('/jobs');
+      }, 0);
+    }
+  }, [slug, token, navigate]);
+
+  // Initial fetch - using setTimeout to avoid cascading renders
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      setTimeout(() => {
+        fetchJobData();
+      }, 0);
+    }
+  }, [fetchJobData]);
 
   // Format currency in BDT
   const formatCurrency = (amount) => {
@@ -98,18 +216,6 @@ export default function PublicJobListingShow({
     });
   };
 
-  // Format date and time
-  const formatDateTime = (date) => {
-    if (!date) return 'N/A';
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
   // Get days left
   const getDaysLeft = (deadline) => {
     const daysLeft = Math.ceil((new Date(deadline) - new Date()) / (1000 * 60 * 60 * 24));
@@ -121,6 +227,7 @@ export default function PublicJobListingShow({
 
   // Get deadline color
   const getDeadlineColor = () => {
+    if (!jobListing) return '';
     const daysLeft = Math.ceil((new Date(jobListing.application_deadline) - new Date()) / (1000 * 60 * 60 * 24));
     if (daysLeft <= 3) return 'from-red-50 to-red-100 border-red-200 text-red-800';
     if (daysLeft <= 7) return 'from-orange-50 to-amber-100 border-orange-200 text-orange-800';
@@ -168,6 +275,7 @@ export default function PublicJobListingShow({
 
   // Get salary display
   const getSalaryDisplay = () => {
+    if (!jobListing) return '';
     if (jobListing.as_per_companies_policy) {
       return 'As per company policy';
     }
@@ -188,6 +296,7 @@ export default function PublicJobListingShow({
 
   // Get formatted salary range
   const getFormattedSalaryRange = () => {
+    if (!jobListing) return '';
     if (jobListing.as_per_companies_policy) {
       return 'As per company policy';
     }
@@ -206,15 +315,6 @@ export default function PublicJobListingShow({
     return 'Not specified';
   };
 
-  // Get ATS score color
-  const getAtsScoreColor = (score) => {
-    if (!score) return 'bg-gray-100 text-gray-600';
-    if (score >= 80) return 'bg-emerald-100 text-emerald-800';
-    if (score >= 60) return 'bg-sky-100 text-sky-800';
-    if (score >= 40) return 'bg-amber-100 text-amber-800';
-    return 'bg-rose-100 text-rose-800';
-  };
-
   // Apply Handler
   const handleApply = () => {
     if (!isAuthenticated) {
@@ -229,20 +329,19 @@ export default function PublicJobListingShow({
         cancelButtonText: 'Cancel',
       }).then((result) => {
         if (result.isConfirmed) {
-          router.visit(route('login', { redirect: route('public.jobs.show', jobListing.slug) }));
+          navigate(`/login?redirect=/jobs/${slug}`);
         }
       });
       return;
     }
 
     setIsApplying(true);
-    router.visit(route('backend.apply.create', jobListing.slug), {
-      onFinish: () => setIsApplying(false),
-    });
+    navigate(`/apply/${slug}`);
+    setIsApplying(false);
   };
 
   // Bookmark Handler
-  const handleBookmark = () => {
+  const handleBookmark = async () => {
     if (!isAuthenticated) {
       Swal.fire({
         title: 'Login Required',
@@ -255,7 +354,7 @@ export default function PublicJobListingShow({
         cancelButtonText: 'Cancel',
       }).then((result) => {
         if (result.isConfirmed) {
-          router.visit(route('login', { redirect: route('public.jobs.show', jobListing.slug) }));
+          navigate(`/login?redirect=/jobs/${slug}`);
         }
       });
       return;
@@ -263,11 +362,17 @@ export default function PublicJobListingShow({
 
     setIsSavingBookmark(true);
 
-    if (isBookmarked) {
-      // Remove bookmark
-      router.delete(route('bookmarks.destroy', bookmarkId), {
-        preserveScroll: true,
-        onSuccess: () => {
+    try {
+      if (isBookmarked) {
+        // Remove bookmark
+        await axios.delete(`/api/bookmarks/${bookmarkId}`, {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          }
+        });
+        setTimeout(() => {
           setIsBookmarked(false);
           setBookmarkId(null);
           Swal.fire({
@@ -277,25 +382,21 @@ export default function PublicJobListingShow({
             timer: 1500,
             showConfirmButton: false,
           });
-        },
-        onError: (error) => {
-          Swal.fire({
-            icon: 'error',
-            title: 'Error',
-            text: error?.message || 'Failed to remove bookmark.',
-          });
-        },
-        onFinish: () => setIsSavingBookmark(false),
-      });
-    } else {
-      // Add bookmark
-      router.post(route('bookmarks.store'), {
-        job_listing_id: jobListing.id,
-      }, {
-        preserveScroll: true,
-        onSuccess: (response) => {
+        }, 0);
+      } else {
+        // Add bookmark
+        const response = await axios.post('/api/bookmarks', {
+          job_listing_id: jobListing.id,
+        }, {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          }
+        });
+        setTimeout(() => {
           setIsBookmarked(true);
-          setBookmarkId(response.props.bookmarkId);
+          setBookmarkId(response.data.bookmarkId);
           Swal.fire({
             icon: 'success',
             title: 'Saved!',
@@ -303,16 +404,20 @@ export default function PublicJobListingShow({
             timer: 1500,
             showConfirmButton: false,
           });
-        },
-        onError: (error) => {
-          Swal.fire({
-            icon: 'error',
-            title: 'Error',
-            text: error?.message || 'Failed to save bookmark.',
-          });
-        },
-        onFinish: () => setIsSavingBookmark(false),
-      });
+        }, 0);
+      }
+    } catch (error) {
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: error.response?.data?.message || 'Failed to update bookmark.',
+        });
+      }, 0);
+    } finally {
+      setTimeout(() => {
+        setIsSavingBookmark(false);
+      }, 0);
     }
   };
 
@@ -320,13 +425,15 @@ export default function PublicJobListingShow({
   const handleShare = () => {
     const url = window.location.href;
     navigator.clipboard.writeText(url);
-    Swal.fire({
-      icon: 'success',
-      title: 'Link Copied!',
-      text: 'Job link has been copied to clipboard.',
-      timer: 2000,
-      showConfirmButton: false,
-    });
+    setTimeout(() => {
+      Swal.fire({
+        icon: 'success',
+        title: 'Link Copied!',
+        text: 'Job link has been copied to clipboard.',
+        timer: 2000,
+        showConfirmButton: false,
+      });
+    }, 0);
     setShowShareMenu(false);
   };
 
@@ -337,106 +444,83 @@ export default function PublicJobListingShow({
 
   // Edit Job Handler (for employers)
   const handleEditJob = () => {
-    router.visit(route('employer.jobs.edit', jobListing.slug));
+    navigate(`/employer/jobs/${slug}/edit`);
   };
 
   // Manage Applications Handler (for employers)
   const handleManageApplications = () => {
-    router.visit(route('employer.jobs.applications', jobListing.slug));
+    navigate(`/employer/jobs/${slug}/applications`);
   };
 
-  // Info Section Component
-  const InfoSection = ({ title, icon: Icon, children, badge }) => (
-    <div className="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden border border-gray-100">
-      <div className="flex items-center justify-between px-6 py-4 bg-linear-to-r from-gray-50/50 to-white border-b border-gray-100">
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 bg-blue-50 rounded-lg">
-            <Icon className="text-blue-600" size={16} />
+  // Check if user owns this job
+  const isJobOwner = user && jobListing && user.employer_id === jobListing.employer_id;
+
+  // Check if user can edit job
+  const canEditJob = isJobOwner || user?.roles?.some(r => r.slug === 'super-admin') || user?.permissions?.includes('jobs.manage');
+
+  // Loading state
+  if (loading) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Loading Job Details...</title>
+        </Helmet>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-gray-500 mt-4">Loading job details...</p>
           </div>
-          <h2 className="font-semibold text-gray-900">{title}</h2>
         </div>
-        {badge && badge}
-      </div>
-      <div className="p-6">{children}</div>
-    </div>
-  );
+      </JobSeekerLayout>
+    );
+  }
 
-  // Info Row Component
-  const InfoRow = ({ label, value, isHtml = false }) => (
-    <div className="py-3 first:pt-0 last:pb-0 border-b border-gray-100 last:border-0">
-      <dt className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">{label}</dt>
-      <dd className="text-gray-800">
-        {isHtml ? (
-          <div dangerouslySetInnerHTML={{ __html: value }} className="prose prose-sm max-w-none" />
-        ) : (
-          value || <span className="text-gray-400 italic">Not provided</span>
-        )}
-      </dd>
-    </div>
-  );
-
-  // Tag List Component
-  const TagList = ({ items, color = 'blue' }) => {
-    const colorClasses = {
-      blue: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
-      green: 'bg-green-50 text-green-700 ring-1 ring-green-200',
-      purple: 'bg-purple-50 text-purple-700 ring-1 ring-purple-200',
-      amber: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
-    };
+  if (!jobListing) {
     return (
-      <div className="flex flex-wrap gap-2">
-        {items?.length > 0 ? (
-          items.map((item, index) => (
-            <span
-              key={index}
-              className={`inline-flex px-2.5 py-1 text-xs font-medium rounded-full ${colorClasses[color] || colorClasses.blue}`}
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Job Not Found</title>
+        </Helmet>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaBriefcase className="w-10 h-10 text-gray-400" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Job Not Found</h2>
+            <p className="text-gray-500 mt-2">The job you're looking for doesn't exist or has been removed.</p>
+            <Link
+              to="/jobs"
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
             >
-              {item}
-            </span>
-          ))
-        ) : (
-          <span className="text-gray-400 italic text-sm">None provided</span>
-        )}
-      </div>
-    );
-  };
-
-  // Stat Card Component
-  const StatCard = ({ title, value, color, icon: Icon, subtitle }) => {
-    const colorClasses = {
-      blue: 'from-blue-50 to-sky-50 ring-blue-100',
-      purple: 'from-purple-50 to-fuchsia-50 ring-purple-100',
-      indigo: 'from-indigo-50 to-blue-50 ring-indigo-100',
-      gray: 'from-gray-50 to-slate-50 ring-gray-100',
-    };
-    return (
-      <div className="bg-linear-to-br rounded-xl p-4 text-center transition-all duration-300 hover:scale-105 ring-1 ring-gray-100 shadow-sm hover:shadow-md">
-        <div className={`inline-flex items-center justify-center w-10 h-10 rounded-full bg-linear-to-br ${colorClasses[color]} mb-2.5`}>
-          <Icon className={`text-${color === 'blue' ? 'blue' : color === 'purple' ? 'purple' : color === 'indigo' ? 'indigo' : 'gray'}-600`} size={16} />
+              <FaArrowLeft size={14} />
+              Back to Jobs
+            </Link>
+          </div>
         </div>
-        <h3 className="text-xl font-bold text-gray-900">{value}</h3>
-        <p className="text-xs text-gray-500 mt-1">{title}</p>
-        {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
-      </div>
+      </JobSeekerLayout>
     );
-  };
+  }
 
-  // Deadline Card Component
   const deadlineColor = getDeadlineColor();
   const isExpired = new Date(jobListing.application_deadline) < new Date();
-  const canEditJob = isJobOwner || isSuperAdmin || canManageJobs;
 
   return (
-    <AuthenticatedLayout>
-      <Head title={`${jobListing.title} - Job Details`} />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>{`${jobListing.title} - Job Details`}</title>
+        <meta name="description" content={`${jobListing.title} at ${jobListing.employer?.name || 'Company'}`} />
+        <meta property="og:title" content={jobListing.title} />
+        <meta property="og:description" content={jobListing.description?.substring(0, 200) || 'Job opportunity'} />
+        <meta name="twitter:card" content="summary_large_image" />
+      </Helmet>
 
       <div className="min-h-screen bg-linear-to-br from-gray-50 via-white to-gray-50">
         {/* Hero Section */}
         <div className="relative bg-linear-to-br from-blue-700 via-blue-600 to-indigo-700 text-white overflow-hidden">
           <div className="absolute inset-0 bg-black/5"></div>
-          <div className="relative  mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-10">
+          <div className="relative mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-10">
             <button
-              onClick={() => window.history.back()}
+              onClick={() => navigate('/jobs')}
               className="group inline-flex items-center gap-2 text-white/70 hover:text-white mb-6 transition-all duration-200 hover:-translate-x-0.5"
             >
               <FaArrowLeft size={14} />
@@ -547,7 +631,7 @@ export default function PublicJobListingShow({
         </div>
 
         {/* Main Content */}
-        <div className=" mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-10">
+        <div className="mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-10">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left Column - Main Content */}
             <div className="lg:col-span-2 space-y-6">
@@ -797,9 +881,9 @@ export default function PublicJobListingShow({
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {relatedJobs.map((job) => (
-                  <a
+                  <Link
                     key={job.id}
-                    href={route('public.jobs.show', job.slug)}
+                    to={`/jobs/${job.slug}`}
                     className="group bg-white rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 p-5 border border-gray-100 hover:border-blue-200 block"
                   >
                     <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-1 mb-2">
@@ -824,7 +908,7 @@ export default function PublicJobListingShow({
                         </span>
                       </div>
                     </div>
-                  </a>
+                  </Link>
                 ))}
               </div>
             </div>
@@ -903,6 +987,6 @@ export default function PublicJobListingShow({
           overflow: hidden;
         }
       `}</style>
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

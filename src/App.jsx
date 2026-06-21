@@ -1,3 +1,5 @@
+// src/App.jsx
+
 // React
 import { Suspense } from 'react';
 import { HelmetProvider } from 'react-helmet-async';
@@ -13,10 +15,10 @@ import VerifyEmail from './pages/Auth/VerifyEmail';
 import EmailVerified from './pages/Auth/EmailVerified';
 import ConfirmPassword from './pages/Auth/ConfirmPassword';
 import CompleteProfile from './pages/Auth/CompleteProfile';
+import Dashboard from './pages/Dashboard/Dashboard';
 
 /**
  * LoadingSpinner - Shown while page data is being fetched
- * Uses Tailwind CSS for styling with the brand color (#009BE2)
  */
 const LoadingSpinner = () => (
   <div className="min-h-screen flex items-center justify-center">
@@ -27,10 +29,8 @@ const LoadingSpinner = () => (
   </div>
 );
 
-
 /**
- * NotFound - Shown when a route doesn't match any page
- * 404 page with a link back to home
+ * NotFound - 404 page
  */
 const NotFound = () => (
   <div className="min-h-[60vh] flex items-center justify-center px-4">
@@ -45,16 +45,14 @@ const NotFound = () => (
   </div>
 );
 
-
 function App() {
-
   return (
-    <HelmetProvider> {/* Provides SEO metadata management */}
-      <Router> {/* React Router for navigation */}
-        <Suspense fallback={<LoadingSpinner />}> {/* Handles lazy loading states */}
+    <HelmetProvider>
+      <Router>
+        <Suspense fallback={<LoadingSpinner />}>
           <Routes>
-
             <Route path="/" element={<Navigate to="/login" />} />
+
             {/* Auth Routes using AuthLayout */}
             <Route element={<AuthLayout />}>
               <Route path="/login" element={<Login />} />
@@ -67,14 +65,16 @@ function App() {
               <Route path="/profile/complete" element={<CompleteProfile />} />
             </Route>
 
-            {/* Catch-all route for 404 - must be last */}
+            {/* Dashboard route - WITHOUT layout wrapper */}
+            <Route path="/dashboard" element={<Dashboard />} />
+
+            {/* Catch-all route for 404 */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
-      </Router >
-    </HelmetProvider >
-
-  )
+      </Router>
+    </HelmetProvider>
+  );
 }
 
-export default App
+export default App;

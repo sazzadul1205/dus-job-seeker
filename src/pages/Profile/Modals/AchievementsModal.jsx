@@ -1,10 +1,16 @@
-// resources/js/Pages/Backend/ApplicantProfile/Modals/AchievementsModal.jsx
+// src/pages/Profile/Modals/AchievementsModal.jsx
 
 // React
 import { useState } from 'react';
 
+// Axios
+import axios from 'axios';
+
 // SweetAlert
 import Swal from 'sweetalert2';
+
+// Modals
+import Modal from './Modal';
 
 // Icons
 import {
@@ -16,47 +22,23 @@ import {
   FaMedal,
   FaCertificate,
   FaRegStar,
-  FaSpinner
 } from 'react-icons/fa';
 import { MdEmojiEvents, MdVerified } from 'react-icons/md';
 import { GiAchievement, GiMedalSkull } from 'react-icons/gi';
 
-// Components
-import Modal from './Modal';
-
-/**
- * AchievementsModal Component
- * 
- * Allows users to manage their achievements, certifications, and awards.
- * Supports adding, editing, and deleting achievements.
- * 
- * Features:
- * - Add/Edit achievement titles and descriptions
- * - Delete existing achievements
- * - Visual preview of achievements
- * - Maximum 3 achievements limit
- * 
- * @param {Object} props
- * @param {boolean} props.isOpen - Whether modal is open
- * @param {Function} props.onClose - Callback when modal closes
- * @param {Object} props.profile - User profile data containing achievements
- */
-const AchievementsModal = ({ isOpen, onClose, profile }) => {
+export default function AchievementsModal({ isOpen, onClose, profile }) {
   const [saving, setSaving] = useState(false);
+  const token = localStorage.getItem('token');
 
-  // Initialize modal data from profile
   const [modalData, setModalData] = useState({
     achievements: profile?.achievements?.map(ach => ({
       id: ach.id || null,
       achievement_name: ach.achievement_name || '',
       achievement_details: ach.achievement_details || '',
-      to_delete: false // Flag for soft deletion
+      to_delete: false
     })) || [],
   });
 
-  /**
-   * Add a new empty achievement to the list
-   */
   const addAchievement = () => {
     setModalData({
       ...modalData,
@@ -72,58 +54,41 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
     });
   };
 
-  /**
-   * Update a specific achievement field
-   * @param {number} index - Index of achievement to update
-   * @param {string} field - Field name ('achievement_name' or 'achievement_details')
-   * @param {string} value - New value
-   */
   const updateAchievement = (index, field, value) => {
     const updatedAchievements = [...modalData.achievements];
     updatedAchievements[index][field] = value;
     setModalData({ ...modalData, achievements: updatedAchievements });
   };
 
-  /**
-   * Remove achievement (soft delete for existing, hard delete for new)
-   * @param {number} index - Index of achievement to remove
-   */
   const removeAchievement = (index) => {
     const updatedAchievements = [...modalData.achievements];
     if (updatedAchievements[index].id) {
-      // Mark existing achievement for deletion
       updatedAchievements[index].to_delete = true;
     } else {
-      // Remove unsaved achievement immediately
       updatedAchievements.splice(index, 1);
     }
     setModalData({ ...modalData, achievements: updatedAchievements });
   };
 
-  /**
-   * Save achievements to the server
-   * Sends PUT request to update achievements endpoint
-   */
   const handleSave = async () => {
     setSaving(true);
 
     try {
-      const response = await fetch(route('backend.applicant.profile.update-achievements', profile.id), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
+      const response = await axios.put(
+        `/api/applicant-profiles/${profile.id}/update-achievements`,
+        {
           achievements: modalData.achievements
-        })
-      });
+        },
+        {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          }
+        }
+      );
 
-      const responseData = await response.json();
-
-      if (responseData.success) {
+      if (response.data.success) {
         Swal.fire({
           icon: 'success',
           title: 'Updated!',
@@ -131,27 +96,21 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
           timer: 1500,
           showConfirmButton: false
         });
-        // Reload page to reflect changes
-        window.location.reload();
+        onClose();
       } else {
-        throw new Error(responseData.message || 'Failed to update');
+        throw new Error(response.data.message || 'Failed to update');
       }
     } catch (error) {
       Swal.fire({
         icon: 'error',
         title: 'Error!',
-        text: error.message || 'Failed to update achievements.',
+        text: error.response?.data?.message || error.message || 'Failed to update achievements.',
       });
     } finally {
       setSaving(false);
     }
   };
 
-  /**
-   * Get appropriate icon based on achievement title
-   * @param {string} title - Achievement title
-   * @returns {JSX.Element} - Icon component
-   */
   const getAchievementIcon = (title) => {
     if (title?.toLowerCase().includes('certificate') || title?.toLowerCase().includes('certified')) {
       return <FaCertificate className="h-4 w-4 text-purple-500" />;
@@ -167,13 +126,11 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
 
   if (!isOpen) return null;
 
-  // Filter out deleted achievements
   const activeAchievements = modalData.achievements.filter(ach => !ach.to_delete);
 
   return (
     <Modal title="Edit Achievements & Certifications" onClose={onClose} onSave={handleSave} saving={saving}>
       <div className="space-y-6">
-        {/* Header Section */}
         <div className="border-b border-gray-200 pb-4">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-blue-100 rounded-lg">
@@ -186,7 +143,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
           </div>
         </div>
 
-        {/* Empty State */}
         {activeAchievements.length === 0 && (
           <div className="text-center py-12 bg-linear-to-b from-gray-50 to-gray-100 rounded-xl">
             <div className="p-4 bg-white rounded-full w-20 h-20 mx-auto mb-4 shadow-md flex items-center justify-center">
@@ -197,10 +153,8 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
           </div>
         )}
 
-        {/* Achievements List */}
         {activeAchievements.map((achievement, index) => (
           <div key={achievement.id} className="border border-gray-200 rounded-xl p-5 relative hover:shadow-lg transition-all duration-200 bg-white">
-            {/* Delete Button */}
             <button
               onClick={() => removeAchievement(index)}
               className="absolute top-4 right-4 text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded-lg transition-colors duration-200"
@@ -209,7 +163,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
               <FaTrashAlt className="h-4 w-4" />
             </button>
 
-            {/* Achievement Header */}
             <div className="flex items-center space-x-2 mb-4 pb-2 border-b border-gray-100">
               <FaTrophy className="h-5 w-5 text-yellow-500" />
               <span className="text-sm font-semibold text-gray-600">Achievement #{index + 1}</span>
@@ -220,7 +173,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
               )}
             </div>
 
-            {/* Achievement Title Field */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <span className="flex items-center gap-2">
@@ -237,7 +189,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
               />
             </div>
 
-            {/* Achievement Details Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <span className="flex items-center gap-2">
@@ -254,7 +205,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
               />
             </div>
 
-            {/* Preview Section */}
             {(achievement.achievement_name || achievement.achievement_details) && (
               <div className="mt-4 p-3 bg-linear-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-100">
                 <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
@@ -276,7 +226,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
           </div>
         ))}
 
-        {/* Add Achievement Button */}
         <button
           onClick={addAchievement}
           disabled={activeAchievements.length >= 3}
@@ -287,7 +236,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
           Add Achievement / Certification
         </button>
 
-        {/* Tips Section */}
         {activeAchievements.length > 0 && (
           <div className="bg-linear-to-r from-yellow-50 to-orange-50 rounded-xl p-4 border border-yellow-100">
             <div className="flex items-center justify-center gap-2">
@@ -299,7 +247,6 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
           </div>
         )}
 
-        {/* Example Achievements */}
         {activeAchievements.length === 0 && (
           <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
             <p className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
@@ -329,6 +276,4 @@ const AchievementsModal = ({ isOpen, onClose, profile }) => {
       </div>
     </Modal>
   );
-};
-
-export default AchievementsModal;
+}

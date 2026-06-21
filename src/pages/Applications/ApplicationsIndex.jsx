@@ -1,16 +1,15 @@
-// resources/js/Pages/Backend/Apply/Index.jsx
+// src/pages/Applications/ApplicationsIndex.jsx
 
 // React
-import { useState, useEffect } from 'react';
-
-// Inertia
-import { Head, router, usePage, Link } from '@inertiajs/react';
+import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
+import { useState, useEffect, useCallback } from 'react';
 
 // Layout
-import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
-// Auth
-import { useAuth } from '../../../hooks/useAuth';
+// Axios
+import axios from 'axios';
 
 // Icons
 import {
@@ -25,7 +24,6 @@ import {
   FaBuilding,
   FaDollarSign,
   FaFilePdf,
-  FaClock,
   FaCheck,
   FaHourglassHalf,
   FaUserCheck,
@@ -41,129 +39,139 @@ import {
 // SweetAlert2
 import Swal from 'sweetalert2';
 
-export default function ApplyIndex({ applications: initialApplications, stats: initialStats }) {
-  // 
-  const { flash } = usePage().props;
+export default function ApplicationsIndex() {
 
-  // Use centralized auth hook
-  const {
-    user: currentUser,
-    isAuthenticated,
-    hasRole,
-    hasAnyPermission,
-  } = useAuth();
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
+  const token = localStorage.getItem('token');
 
-  // Check user role and permissions
-  const isJobSeeker = hasRole('job-seeker') || hasRole('job_seeker');
-  const canViewAllApplications = hasAnyPermission(['applications.view', 'applications.manage']);
-  const isAdmin = canViewAllApplications;
-
-  // If user is not authenticated, show access denied
-  if (!isAuthenticated) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaShieldAlt className="w-10 h-10 text-red-500" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
-            <p className="text-gray-500 mt-2">Please login to view your applications.</p>
-            <button
-              onClick={() => router.visit(route('login'))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Login Now
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
-
-  // If user is employer (not job seeker), show message
-  if (!isJobSeeker && !isAdmin) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center max-w-md mx-auto p-6">
-            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaBriefcase className="w-10 h-10 text-yellow-600" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Employer Account</h2>
-            <p className="text-gray-500 mt-2">
-              Employer accounts cannot submit job applications. Please create a job seeker account to apply for jobs.
-            </p>
-            <button
-              onClick={() => router.visit(route('backend.dashboard'))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Go to Dashboard
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
-
-  // state
+  // States - moved to top before any conditional returns
+  const [loading, setLoading] = useState(true);
+  const [applications, setApplications] = useState({ data: [] });
+  const [stats, setStats] = useState({
+    total: 0,
+    total_deleted: 0,
+    pending: 0,
+    shortlisted: 0,
+    rejected: 0,
+    hired: 0,
+    average_ats_score: 0,
+  });
   const [restoringId, setRestoringId] = useState(null);
   const [showTrashed, setShowTrashed] = useState(false);
   const [withdrawingId, setWithdrawingId] = useState(null);
   const [recalculatingId, setRecalculatingId] = useState(null);
-  const [applications, setApplications] = useState(initialApplications);
 
-  // stats
-  const [stats, setStats] = useState(initialStats || {
-    total: 0, total_deleted: 0, pending: 0, shortlisted: 0, rejected: 0, hired: 0, average_ats_score: 0,
-  });
+  // Check user role - moved before hooks
+  const isJobSeeker = user?.roles?.some(r => r.slug === 'job-seeker');
+  const isAdmin = user?.permissions?.includes('applications.manage');
 
-  // pagination
-  const applicationItems = applications?.data || [];
-  const pagination = applications?.data ? {
-    currentPage: applications.current_page,
-    lastPage: applications.last_page,
-    total: applications.total,
-    from: applications.from,
-    to: applications.to,
-  } : null;
+  // Fetch data - useCallback must be called at top level
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/applications`, {
+        params: {
+          show_trashed: showTrashed ? 'true' : 'false',
+        },
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
 
-  // Show trashed applications handler
+      setTimeout(() => {
+        setApplications(response.data.applications || { data: [] });
+        setStats(response.data.stats || {
+          total: 0,
+          total_deleted: 0,
+          pending: 0,
+          shortlisted: 0,
+          rejected: 0,
+          hired: 0,
+          average_ats_score: 0,
+        });
+        setLoading(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching applications:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+        setLoading(false);
+      }, 0);
+    }
+  }, [token, showTrashed]);
+
+  // Fetch with page - useCallback must be called at top level
+  const fetchDataWithPage = useCallback(async (page) => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/applications`, {
+        params: {
+          show_trashed: showTrashed ? 'true' : 'false',
+          page: page,
+        },
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
+
+      setTimeout(() => {
+        setApplications(response.data.applications || { data: [] });
+        setStats(response.data.stats || {
+          total: 0,
+          total_deleted: 0,
+          pending: 0,
+          shortlisted: 0,
+          rejected: 0,
+          hired: 0,
+          average_ats_score: 0,
+        });
+        setLoading(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching applications:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+        setLoading(false);
+      }, 0);
+    }
+  }, [token, showTrashed]);
+
+  // Initial fetch - useEffect must be called at top level
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchData();
+    }
+  }, [isAuthenticated, fetchData]);
+
+  // All helper functions and handlers
   const toggleShowTrashed = () => {
     const newValue = !showTrashed;
     setShowTrashed(newValue);
-    router.get(route('backend.apply.index'), { show_trashed: newValue ? 'true' : 'false' }, {
-      preserveState: true,
-      preserveScroll: true,
-      replace: true,
-      onSuccess: (page) => {
-        setApplications(page.props.applications);
-        setStats(page.props.stats);
-      },
-    });
+    setTimeout(() => fetchData(), 0);
   };
 
-  // Handle page change
   const handlePageChange = (page) => {
     if (page === pagination?.currentPage || page < 1 || page > pagination?.lastPage) return;
-    router.get(route('backend.apply.index'), {
-      page: page,
-      show_trashed: showTrashed ? 'true' : 'false'
-    }, {
-      preserveState: true,
-      preserveScroll: true,
-      replace: true,
-      onSuccess: (page) => {
-        setApplications(page.props.applications);
-        setStats(page.props.stats);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      },
-    });
+    fetchDataWithPage(page);
   };
 
-  // Handle withdraw
   const handleWithdraw = (id) => {
     Swal.fire({
       title: 'Withdraw Application?',
@@ -174,25 +182,37 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Yes, withdraw',
       cancelButtonText: 'Cancel',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setWithdrawingId(id);
-        router.delete(route('backend.apply.destroy', id), {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.delete(`/api/applications/${id}`, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+          setTimeout(() => {
             Swal.fire({ icon: 'success', title: 'Withdrawn!', timer: 1500, showConfirmButton: false });
-            router.reload();
-          },
-          onError: (errors) => {
-            Swal.fire({ icon: 'error', title: 'Failed', text: errors?.message || 'Unable to withdraw.', confirmButtonColor: '#ef4444' });
-          },
-          onFinish: () => setWithdrawingId(null),
-        });
+            fetchData();
+            setWithdrawingId(null);
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
+            Swal.fire({
+              icon: 'error',
+              title: 'Failed',
+              text: error.response?.data?.message || 'Unable to withdraw.',
+              confirmButtonColor: '#ef4444',
+            });
+            setWithdrawingId(null);
+          }, 0);
+        }
       }
     });
   };
 
-  // Handle restore
   const handleRestore = (id) => {
     Swal.fire({
       title: 'Restore Application?',
@@ -202,25 +222,37 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
       confirmButtonColor: '#10b981',
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Yes, restore',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setRestoringId(id);
-        router.post(route('backend.apply.restore', id), {}, {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.post(`/api/applications/${id}/restore`, {}, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+          setTimeout(() => {
             Swal.fire({ icon: 'success', title: 'Restored!', timer: 1500, showConfirmButton: false });
-            router.reload();
-          },
-          onError: (errors) => {
-            Swal.fire({ icon: 'error', title: 'Failed', text: errors?.message || 'Unable to restore.' });
-          },
-          onFinish: () => setRestoringId(null),
-        });
+            fetchData();
+            setRestoringId(null);
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
+            Swal.fire({
+              icon: 'error',
+              title: 'Failed',
+              text: error.response?.data?.message || 'Unable to restore.',
+              confirmButtonColor: '#d33',
+            });
+            setRestoringId(null);
+          }, 0);
+        }
       }
     });
   };
 
-  // Handle force delete
   const handleForceDelete = (id, jobTitle) => {
     Swal.fire({
       title: 'Permanently Delete?',
@@ -230,24 +262,34 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
       confirmButtonColor: '#ef4444',
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Yes, delete permanently',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
-        router.delete(route('backend.apply.force-delete', id), {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.delete(`/api/applications/${id}/force`, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+          setTimeout(() => {
             Swal.fire({ icon: 'success', title: 'Deleted!', timer: 1500, showConfirmButton: false });
-            router.reload();
-          },
-          onError: (errors) => {
-            Swal.fire({ icon: 'error', title: 'Failed', text: errors?.message || 'Unable to delete.' });
-          },
-        });
+            fetchData();
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
+            Swal.fire({
+              icon: 'error',
+              title: 'Failed',
+              text: error.response?.data?.message || 'Unable to delete.',
+              confirmButtonColor: '#d33',
+            });
+          }, 0);
+        }
       }
     });
   };
 
-
-  // Handle recalculate
   const handleRecalculateAts = (id) => {
     Swal.fire({
       title: 'Recalculate ATS Score?',
@@ -257,31 +299,52 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
       confirmButtonColor: '#3b82f6',
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Yes, recalculate',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setRecalculatingId(id);
-        router.post(route('backend.apply.recalculate-ats', id), {}, {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.post(`/api/applications/${id}/recalculate-ats`, {}, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+          setTimeout(() => {
             Swal.fire({ icon: 'success', title: 'Recalculated!', timer: 1500, showConfirmButton: false });
-            router.reload();
-          },
-          onError: (errors) => {
-            Swal.fire({ icon: 'error', title: 'Failed', text: errors?.message || 'Unable to recalculate.' });
-          },
-          onFinish: () => setRecalculatingId(null),
-        });
+            fetchData();
+            setRecalculatingId(null);
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
+            Swal.fire({
+              icon: 'error',
+              title: 'Failed',
+              text: error.response?.data?.message || 'Unable to recalculate.',
+              confirmButtonColor: '#d33',
+            });
+            setRecalculatingId(null);
+          }, 0);
+        }
       }
     });
   };
 
-  // format date
+  // Get pagination
+  const pagination = applications?.data ? {
+    currentPage: applications.current_page || 1,
+    lastPage: applications.last_page || 1,
+    total: applications.total || 0,
+    from: applications.from || 0,
+    to: applications.to || 0,
+  } : null;
+
+  // Format functions
   const formatDate = (date) => {
     if (!date) return 'N/A';
     return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
-  // Get status badge
   const getStatusBadge = (status) => {
     const badges = {
       pending: 'bg-amber-100 text-amber-800',
@@ -292,13 +355,11 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
     return badges[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // Get status text
   const getStatusText = (status) => {
     const texts = { pending: 'Pending', shortlisted: 'Shortlisted', rejected: 'Rejected', hired: 'Hired' };
     return texts[status] || status;
   };
 
-  // Get status icon
   const getStatusIcon = (status) => {
     const icons = {
       pending: <FaRegClock className="text-amber-500" size={14} />,
@@ -309,7 +370,6 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
     return icons[status] || <FaBriefcase className="text-gray-500" size={14} />;
   };
 
-  // Get ATS score color
   const getAtsScoreColor = (score) => {
     if (!score) return 'text-gray-500';
     if (score >= 80) return 'text-emerald-600';
@@ -318,7 +378,6 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
     return 'text-rose-600';
   };
 
-  // Get ATS score background
   const getAtsScoreBg = (score) => {
     if (!score) return 'bg-gray-100';
     if (score >= 80) return 'bg-emerald-100';
@@ -327,13 +386,12 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
     return 'bg-rose-100';
   };
 
-  // Format salary
   const formatSalary = (salary) => {
     if (!salary) return null;
     return new Intl.NumberFormat('en-US').format(salary) + ' BDT';
   };
 
-  // Get stats cards
+  // Stats cards
   const statsCards = [
     { title: 'Total', value: stats.total, icon: <FaBriefcase size={18} />, color: 'blue', key: 'total' },
     { title: 'Pending', value: stats.pending, icon: <FaHourglassHalf size={18} />, color: 'amber', key: 'pending' },
@@ -344,17 +402,7 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
     { title: 'Avg. ATS', value: stats.average_ats_score ? `${Math.round(stats.average_ats_score)}%` : 'N/A', icon: <FaChartLine size={18} />, color: 'purple', key: 'ats' },
   ];
 
-  // Flash message
-  useEffect(() => {
-    if (flash?.success) {
-      Swal.fire({ icon: 'success', title: 'Success!', text: flash.success, timer: 2000, showConfirmButton: false });
-    }
-    if (flash?.error) {
-      Swal.fire({ icon: 'error', title: 'Error!', text: flash.error, confirmButtonColor: '#ef4444' });
-    }
-  }, [flash]);
-
-  // Pagination
+  // Pagination Component
   const Pagination = () => {
     if (!pagination || pagination.lastPage <= 1) return null;
 
@@ -427,15 +475,94 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
     );
   };
 
-  // Admin can see all applications, job seekers only see their own
+  // Application items
+  const applicationItems = applications?.data || [];
   const applicationsCount = applicationItems.length;
 
+  // ==================== EARLY RETURNS (after all hooks) ====================
+
+  // If user is not authenticated
+  if (!isAuthenticated) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaShieldAlt className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
+            <p className="text-gray-500 mt-2">Please login to view your applications.</p>
+            <Link
+              to="/login"
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Login Now
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user is employer (not job seeker)
+  if (!isJobSeeker && !isAdmin) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto p-6">
+            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaBriefcase className="w-10 h-10 text-yellow-600" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Employer Account</h2>
+            <p className="text-gray-500 mt-2">
+              Employer accounts cannot submit job applications. Please create a job seeker account to apply for jobs.
+            </p>
+            <Link
+              to="/dashboard"
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Go to Dashboard
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // Loading state
+  if (loading) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Loading Applications...</title>
+        </Helmet>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-gray-500 mt-4">Loading applications...</p>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // ==================== MAIN RENDER ====================
+
   return (
-    <AuthenticatedLayout>
-      <Head title={showTrashed ? "Withdrawn Applications" : "My Applications"} />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>{showTrashed ? "Withdrawn Applications" : "My Applications"}</title>
+        <meta name="description" content="View and manage your job applications" />
+      </Helmet>
 
       <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100/50 p-4 md:p-6">
-        <div className=" mx-auto">
+        <div className="mx-auto">
           {/* Header */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
             <div>
@@ -464,7 +591,7 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
               </button>
               {!showTrashed && (
                 <Link
-                  href={route('public.jobs.index')}
+                  to="/jobs"
                   className="bg-linear-to-r from-blue-600 to-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:from-blue-700 hover:to-blue-800 transition-all shadow-sm text-sm font-medium"
                 >
                   <FaPlus size={12} />
@@ -523,7 +650,7 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
                 </p>
                 {!showTrashed && (
                   <Link
-                    href={route('public.jobs.index')}
+                    to="/jobs"
                     className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition mt-4"
                   >
                     <FaPlus size={12} /> Browse Jobs
@@ -536,8 +663,7 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
               const trashed = !!app.deleted_at;
               const isPending = !trashed && app.status === 'pending';
               const isProcessing = app.ats_calculation_status === 'processing';
-              // For admin, check if this is the user's own application
-              const isOwnApplication = currentUser?.id === app.user_id;
+              const isOwnApplication = user?.id === app.user_id;
 
               return (
                 <div
@@ -548,7 +674,7 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
                   <div className="p-4">
                     {/* Job Title */}
                     <Link
-                      href={route('backend.apply.show', app.id)}
+                      to={`/applications/${app.id}`}
                       className={`font-semibold text-base hover:text-blue-600 transition line-clamp-1 ${trashed ? 'text-gray-500 line-through' : 'text-gray-900'
                         }`}
                     >
@@ -624,7 +750,7 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
                     <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
                       <div className="flex gap-1">
                         <Link
-                          href={route('backend.apply.show', app.id)}
+                          to={`/applications/${app.id}`}
                           className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition"
                           title="View Details"
                         >
@@ -632,7 +758,7 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
                         </Link>
                         {isPending && (
                           <Link
-                            href={route('backend.apply.edit', app.id)}
+                            to={`/applications/${app.id}/edit`}
                             className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
                             title="Edit"
                           >
@@ -729,6 +855,6 @@ export default function ApplyIndex({ applications: initialApplications, stats: i
           overflow: hidden;
         }
       `}</style>
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

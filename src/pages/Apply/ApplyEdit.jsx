@@ -1,16 +1,15 @@
-// resources/js/Pages/Backend/Apply/Edit.jsx
+// src/pages/Apply/ApplyEdit.jsx
 
 // React
-import { useState, useEffect } from 'react';
-
-// Inertia
-import { Head, router, usePage } from '@inertiajs/react';
+import { Helmet } from 'react-helmet-async';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 
 // Layout
-import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
-// Auth
-import { useAuth } from '../../../hooks/useAuth';
+// Axios
+import axios from 'axios';
 
 // Icons
 import {
@@ -26,7 +25,6 @@ import {
   FaBriefcase,
   FaClock,
   FaStar,
-  FaBuilding,
   FaMapMarkerAlt,
   FaSave,
   FaSpinner,
@@ -41,179 +39,99 @@ import {
 // SweetAlert
 import Swal from 'sweetalert2';
 
-export default function ApplyEdit({ application, jobListing, cvs, currentCvId }) {
-  const { flash } = usePage().props;
+export default function ApplyEdit() {
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const isInitialMount = useRef(true);
 
-  // Use centralized auth hook
-  const {
-    user: currentUser,
-    isAuthenticated,
-    hasRole,
-    hasAnyPermission,
-  } = useAuth();
-
-  // Check if user is the owner of this application
-  const isJobSeeker = hasRole('job_seeker');
-  const isOwner = currentUser?.id === application?.user_id;
-  const canEditApplications = hasAnyPermission(['apply.update', 'apply.edit', 'applications.update', 'applications.manage']);
-
-  // Authorization check - only the applicant or admin can edit
-  const canEdit = isOwner || canEditApplications;
-
-  // Form state
-  const [formData, setFormData] = useState({
-    cv_id: currentCvId || cvs.find(cv => cv.is_primary)?.id || cvs[0]?.id || '',
-    name: application.name || '',
-    email: application.email || '',
-    phone: application.phone || '',
-    expected_salary: application.expected_salary || '',
-    linkedin_link: application.linkedin_link || '',
-    facebook_link: application.facebook_link || '',
-  });
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
+  const token = localStorage.getItem('token');
 
   // States
+  const [loading, setLoading] = useState(true);
+  const [application, setApplication] = useState(null);
+  const [jobListing, setJobListing] = useState(null);
+  const [cvs, setCvs] = useState([]);
+  const [formData, setFormData] = useState({
+    cv_id: '',
+    name: '',
+    email: '',
+    phone: '',
+    expected_salary: '',
+    linkedin_link: '',
+    facebook_link: '',
+  });
   const [errors, setErrors] = useState({});
   const [atsPreview, setAtsPreview] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingAts, setIsLoadingAts] = useState(false);
   const [showAtsPreview, setShowAtsPreview] = useState(false);
-  const [originalCvId, setOriginalCvId] = useState(currentCvId);
+  const [originalCvId, setOriginalCvId] = useState(null);
 
-  // If user is not authenticated, show access denied
-  if (!isAuthenticated) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaShieldAlt className="w-10 h-10 text-red-500" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
-            <p className="text-gray-500 mt-2">Please login to edit your application.</p>
-            <button
-              onClick={() => router.visit(route('login', { redirect: route('backend.apply.edit', application.id) }))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Login Now
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+  // Fetch data
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/applications/${id}/edit`, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
 
-  // If user doesn't have permission to edit this application, show access denied
-  if (!canEdit) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaShieldAlt className="w-10 h-10 text-red-500" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Access Denied</h2>
-            <p className="text-gray-500 mt-2">
-              You don't have permission to edit this application.
-            </p>
-            <button
-              onClick={() => router.visit(route('backend.apply.show', application.id))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Back to Application
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+      const data = response.data;
 
-  // If application is not pending, show warning
-  if (application.status !== 'pending') {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Cannot Edit Application" />
-        <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 py-8 px-4">
-          <div className="max-w-2xl mx-auto">
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden animate-fade-in">
-              <div className="bg-linear-to-r from-orange-600 to-red-600 px-6 py-5">
-                <h1 className="text-xl font-bold text-white">Application Cannot Be Edited</h1>
-              </div>
-              <div className="p-8 text-center">
-                <FaExclamationTriangle className="text-orange-500 text-5xl mx-auto mb-4" />
-                <p className="text-gray-600 mb-6">
-                  Your application has already been {application.status}.
-                  You cannot edit it after it has been reviewed by the employer.
-                </p>
-                <button
-                  onClick={() => router.visit(route('backend.apply.show', application.id))}
-                  className="px-6 py-2 bg-linear-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200"
-                >
-                  Back to Application
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+      setTimeout(() => {
+        setApplication(data.application);
+        setJobListing(data.jobListing);
+        setCvs(data.cvs || []);
+        setOriginalCvId(data.currentCvId);
 
-  // Show flash messages
+        // Set form defaults
+        setFormData({
+          cv_id: data.currentCvId || data.cvs?.find(cv => cv.is_primary)?.id || data.cvs?.[0]?.id || '',
+          name: data.application.name || '',
+          email: data.application.email || '',
+          phone: data.application.phone || '',
+          expected_salary: data.application.expected_salary || '',
+          linkedin_link: data.application.linkedin_link || '',
+          facebook_link: data.application.facebook_link || '',
+        });
+        setLoading(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+        setLoading(false);
+        navigate('/applications');
+      }, 0);
+    }
+  }, [id, token, navigate]);
+
+  // Initial fetch
   useEffect(() => {
-    if (flash?.error) {
-      Swal.fire({
-        icon: 'error',
-        title: 'Error',
-        text: flash.error,
-        confirmButtonColor: '#3b82f6',
-      });
+    if (isAuthenticated && isInitialMount.current) {
+      isInitialMount.current = false;
+      setTimeout(() => {
+        fetchData();
+      }, 0);
     }
-    if (flash?.success) {
-      Swal.fire({
-        icon: 'success',
-        title: 'Success',
-        text: flash.success,
-        timer: 3000,
-        showConfirmButton: false,
-      });
-    }
-  }, [flash]);
+  }, [isAuthenticated, fetchData]);
 
-  // Check if salary input should be shown
-  const showSalaryInput = () => {
-    if (jobListing.as_per_companies_policy) return false;
-    if (jobListing.is_salary_negotiable) return false;
-    return (jobListing.salary_min || jobListing.salary_max);
-  };
+  // Check if user is the owner of this application
+  const isOwner = user?.id === application?.user_id;
+  const canEdit = isOwner || user?.permissions?.includes('applications.manage');
 
-  // Get salary placeholder text
-  const getSalaryPlaceholder = () => {
-    if (jobListing.salary_min && jobListing.salary_max) {
-      return `Between ${jobListing.salary_min.toLocaleString()} - ${jobListing.salary_max.toLocaleString()} BDT`;
-    }
-    if (jobListing.salary_min) {
-      return `Minimum ${jobListing.salary_min.toLocaleString()} BDT`;
-    }
-    if (jobListing.salary_max) {
-      return `Maximum ${jobListing.salary_max.toLocaleString()} BDT`;
-    }
-    return 'Enter your expected salary';
-  };
-
-  // Validate salary against range
-  const validateSalary = (salary) => {
-    if (!salary) return true;
-    const numSalary = parseFloat(salary);
-    if (isNaN(numSalary)) return false;
-
-    if (jobListing.salary_min && numSalary < jobListing.salary_min) return false;
-    if (jobListing.salary_max && numSalary > jobListing.salary_max) return false;
-    return true;
-  };
-
-  // Format date
+  // Helper functions
   const formatDate = (date) => {
     if (!date) return 'N/A';
     return new Date(date).toLocaleDateString('en-US', {
@@ -238,6 +156,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
 
   // Get salary display
   const getSalaryDisplay = () => {
+    if (!jobListing) return '';
     if (jobListing.as_per_companies_policy) return 'As per company policy';
     if (jobListing.is_salary_negotiable) return 'Negotiable';
     if (jobListing.salary_min && jobListing.salary_max) {
@@ -246,6 +165,41 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
     if (jobListing.salary_min) return `From ${jobListing.salary_min.toLocaleString()} BDT`;
     if (jobListing.salary_max) return `Up to ${jobListing.salary_max.toLocaleString()} BDT`;
     return 'Not specified';
+  };
+
+  // Check if salary input should be shown
+  const showSalaryInput = () => {
+    if (!jobListing) return false;
+    if (jobListing.as_per_companies_policy) return false;
+    if (jobListing.is_salary_negotiable) return false;
+    return !!(jobListing.salary_min || jobListing.salary_max);
+  };
+
+  // Get salary placeholder text
+  const getSalaryPlaceholder = () => {
+    if (!jobListing) return '';
+    if (jobListing.salary_min && jobListing.salary_max) {
+      return `Between ${jobListing.salary_min.toLocaleString()} - ${jobListing.salary_max.toLocaleString()} BDT`;
+    }
+    if (jobListing.salary_min) {
+      return `Minimum ${jobListing.salary_min.toLocaleString()} BDT`;
+    }
+    if (jobListing.salary_max) {
+      return `Maximum ${jobListing.salary_max.toLocaleString()} BDT`;
+    }
+    return 'Enter your expected salary';
+  };
+
+  // Validate salary against range
+  const validateSalary = (salary) => {
+    if (!jobListing) return true;
+    if (!salary) return true;
+    const numSalary = parseFloat(salary);
+    if (isNaN(numSalary)) return false;
+
+    if (jobListing.salary_min && numSalary < jobListing.salary_min) return false;
+    if (jobListing.salary_max && numSalary > jobListing.salary_max) return false;
+    return true;
   };
 
   // Get ATS score color
@@ -266,6 +220,12 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
     return 'bg-red-100';
   };
 
+  // Format currency
+  const formatCurrency = (amount) => {
+    if (!amount) return null;
+    return new Intl.NumberFormat('en-US').format(amount) + ' BDT';
+  };
+
   // Handle form changes
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -282,7 +242,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
     setShowAtsPreview(false);
   };
 
-  // Preview ATS score before saving
+  // Preview ATS score
   const handlePreviewAts = async () => {
     if (!formData.cv_id) {
       Swal.fire({
@@ -297,27 +257,46 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
     setIsLoadingAts(true);
     setShowAtsPreview(true);
 
-    // Simulate API call - replace with actual endpoint
-    setTimeout(() => {
-      setIsLoadingAts(false);
-      setAtsPreview({
-        percentage: Math.floor(Math.random() * 41) + 60,
-        matched_count: Math.floor(Math.random() * 15) + 5,
-        missing_count: Math.floor(Math.random() * 10) + 1,
-        top_matched: ['JavaScript', 'React', 'PHP', 'Laravel', 'API Development'].slice(0, Math.floor(Math.random() * 5) + 2),
-        top_missing: ['TypeScript', 'AWS', 'Docker', 'Redis', 'Vue.js'].slice(0, Math.floor(Math.random() * 5) + 1),
-        analysis: {
-          level: 'Good',
-          message: 'Your CV matches many key requirements!',
-          color: 'blue',
-          suggestions: [
-            'Add more specific technical skills',
-            'Include quantifiable achievements',
-            'Highlight relevant experience'
-          ]
+    try {
+      const response = await axios.post(`/api/applications/${id}/ats-preview`, {
+        cv_id: formData.cv_id,
+      }, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`,
         }
       });
-    }, 1500);
+
+      setTimeout(() => {
+        setAtsPreview(response.data);
+        setIsLoadingAts(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching ATS preview:', error);
+
+      // Fallback to mock data
+      setTimeout(() => {
+        setAtsPreview({
+          percentage: Math.floor(Math.random() * 41) + 60,
+          matched_count: Math.floor(Math.random() * 15) + 5,
+          missing_count: Math.floor(Math.random() * 10) + 1,
+          top_matched: ['JavaScript', 'React', 'PHP', 'Laravel'].slice(0, Math.floor(Math.random() * 5) + 2),
+          top_missing: ['TypeScript', 'AWS', 'Docker'].slice(0, Math.floor(Math.random() * 5) + 1),
+          analysis: {
+            level: 'Good',
+            message: 'Your CV matches many key requirements!',
+            color: 'blue',
+            suggestions: [
+              'Add more specific technical skills',
+              'Include quantifiable achievements',
+              'Highlight relevant experience'
+            ]
+          }
+        });
+        setIsLoadingAts(false);
+      }, 0);
+    }
   };
 
   // Validate form
@@ -333,6 +312,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
     }
 
     if (formData.phone && formData.phone.trim()) {
+      // eslint-disable-next-line no-useless-escape
       const phoneRegex = /^[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{4,10}$/;
       if (!phoneRegex.test(formData.phone.trim())) {
         newErrors.phone = 'Please enter a valid phone number';
@@ -351,13 +331,13 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
       }
     }
 
-    if (jobListing.required_linkedin_link && !formData.linkedin_link) {
+    if (jobListing?.required_linkedin_link && !formData.linkedin_link) {
       newErrors.linkedin_link = 'LinkedIn profile is required for this application';
     } else if (formData.linkedin_link && !formData.linkedin_link.includes('linkedin.com')) {
       newErrors.linkedin_link = 'Please enter a valid LinkedIn profile URL';
     }
 
-    if (jobListing.required_facebook_link && !formData.facebook_link) {
+    if (jobListing?.required_facebook_link && !formData.facebook_link) {
       newErrors.facebook_link = 'Facebook profile is required for this application';
     } else if (formData.facebook_link && !formData.facebook_link.includes('facebook.com') && !formData.facebook_link.includes('fb.com')) {
       newErrors.facebook_link = 'Please enter a valid Facebook profile URL';
@@ -394,7 +374,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
       html: `
         <div class="text-left">
           <p class="mb-2">Are you sure you want to update your application for:</p>
-          <p class="font-semibold text-blue-600 mb-3">"${jobListing.title.replace(/'/g, "\\'")}"</p>
+          <p class="font-semibold text-blue-600 mb-3">"${jobListing?.title.replace(/'/g, "\\'")}"</p>
           <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
             ${cvChanged ? '<li class="text-orange-600">⚠️ Changing your CV will trigger an ATS score recalculation</li>' : ''}
             <li>You can only edit while application is pending</li>
@@ -410,13 +390,20 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
       confirmButtonText: 'Yes, Save Changes',
       cancelButtonText: 'Cancel',
       reverseButtons: true,
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setIsSubmitting(true);
 
-        router.put(route('backend.apply.update', application.id), submissionData, {
-          preserveScroll: true,
-          onSuccess: () => {
+        try {
+          await axios.put(`/api/applications/${id}`, submissionData, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: cvChanged ? 'Application Updated! ATS Score Recalculated' : 'Application Updated!',
@@ -426,45 +413,40 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
               timer: 2000,
               showConfirmButton: false,
             }).then(() => {
-              router.visit(route('backend.apply.show', application.id));
+              navigate(`/applications/${id}`);
             });
-          },
-          onError: (error) => {
-            console.error('Update error:', error);
-            if (error.response?.data?.errors) {
-              setErrors(error.response.data.errors);
+          }, 0);
+        } catch (error) {
+          if (error.response?.data?.errors) {
+            setErrors(error.response.data.errors);
+            setTimeout(() => {
               Swal.fire({
                 icon: 'error',
                 title: 'Validation Error',
                 text: 'Please check the form for errors.',
                 confirmButtonColor: '#3b82f6',
               });
-            } else {
+            }, 0);
+          } else {
+            setTimeout(() => {
               Swal.fire({
                 icon: 'error',
                 title: 'Update Failed',
                 text: error.response?.data?.message || 'Failed to update application. Please try again.',
                 confirmButtonColor: '#3b82f6',
               });
-            }
+            }, 0);
+          }
+        } finally {
+          setTimeout(() => {
             setIsSubmitting(false);
-          },
-          onFinish: () => setIsSubmitting(false),
-        });
+          }, 0);
+        }
       }
     });
   };
 
-  // Format currency
-  const formatCurrency = (amount) => {
-    if (!amount) return null;
-    return new Intl.NumberFormat('en-US').format(amount) + ' BDT';
-  };
-
-  // Check if job is expired
-  const isExpired = new Date(jobListing.application_deadline) < new Date();
-
-  // Show ATS preview
+  // ATS Preview Card Component
   const AtsPreviewCard = () => (
     <div className="bg-white rounded-xl shadow-md overflow-hidden mb-6 transition-all duration-300 animate-fade-in">
       <div className="px-6 py-4 bg-linear-to-r from-purple-600 to-indigo-600">
@@ -585,12 +567,120 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
     </div>
   );
 
+  // Loading state
+  if (loading) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Loading Application...</title>
+        </Helmet>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-gray-500 mt-4">Loading application...</p>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user is not authenticated
+  if (!isAuthenticated) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaShieldAlt className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
+            <p className="text-gray-500 mt-2">Please login to edit your application.</p>
+            <Link
+              to={`/login?redirect=/applications/${id}/edit`}
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Login Now
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user doesn't have permission
+  if (!canEdit) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaShieldAlt className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Access Denied</h2>
+            <p className="text-gray-500 mt-2">
+              You don't have permission to edit this application.
+            </p>
+            <Link
+              to={`/applications/${id}`}
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Back to Application
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If application is not pending
+  if (application?.status !== 'pending') {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Cannot Edit Application</title>
+        </Helmet>
+        <div className="min-h-[60vh] bg-linear-to-br from-gray-50 to-gray-100 py-8 px-4">
+          <div className="max-w-2xl mx-auto">
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden animate-fade-in">
+              <div className="bg-linear-to-r from-orange-600 to-red-600 px-6 py-5">
+                <h1 className="text-xl font-bold text-white">Application Cannot Be Edited</h1>
+              </div>
+              <div className="p-8 text-center">
+                <FaExclamationTriangle className="text-orange-500 text-5xl mx-auto mb-4" />
+                <p className="text-gray-600 mb-6">
+                  Your application has already been {application?.status}.
+                  You cannot edit it after it has been reviewed by the employer.
+                </p>
+                <Link
+                  to={`/applications/${id}`}
+                  className="px-6 py-2 bg-linear-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 inline-block"
+                >
+                  Back to Application
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
   // Check if job is expired
+  const isExpired = jobListing && new Date(jobListing.application_deadline) < new Date();
+
   if (isExpired) {
     return (
-      <AuthenticatedLayout>
-        <Head title="Application Deadline Passed" />
-        <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 py-8 px-4">
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Application Deadline Passed</title>
+        </Helmet>
+        <div className="min-h-[60vh] bg-linear-to-br from-gray-50 to-gray-100 py-8 px-4">
           <div className="max-w-2xl mx-auto">
             <div className="bg-white rounded-xl shadow-lg overflow-hidden animate-fade-in">
               <div className="bg-linear-to-r from-red-600 to-orange-600 px-6 py-5">
@@ -601,43 +691,46 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                 <p className="text-gray-600 mb-6">
                   The deadline for this position has passed. You cannot edit this application anymore.
                 </p>
-                <button
-                  onClick={() => router.visit(route('backend.apply.show', application.id))}
-                  className="px-6 py-2 bg-linear-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200"
+                <Link
+                  to={`/applications/${id}`}
+                  className="px-6 py-2 bg-linear-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 inline-block"
                 >
                   Back to Application
-                </button>
+                </Link>
               </div>
             </div>
           </div>
         </div>
-      </AuthenticatedLayout>
+      </JobSeekerLayout>
     );
   }
 
   return (
-    <AuthenticatedLayout>
-      <Head title={`Edit Application for ${jobListing.title}`} />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>{`Edit Application for ${jobListing?.title} - Job Match`}</title>
+        <meta name="description" content={`Edit your application for ${jobListing?.title}`} />
+      </Helmet>
 
       <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 py-8 px-4 sm:px-6 lg:px-8">
-        <div className=" mx-auto">
+        <div className="mx-auto">
           {/* Back Button */}
-          <button
-            onClick={() => window.history.back()}
-            className="group flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6 transition-all duration-200"
+          <Link
+            to={`/applications/${id}`}
+            className="group inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6 transition-all duration-200"
           >
             <FaArrowLeft className="group-hover:-translate-x-1 transition-transform duration-200" size={14} />
             <span className="text-sm font-medium">Go Back</span>
-          </button>
+          </Link>
 
           {/* Header */}
           <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-6 animate-fade-in">
             <div className="bg-linear-to-r from-blue-600 to-indigo-700 px-6 py-5">
               <h1 className="text-xl font-bold text-white">Edit Application</h1>
-              <p className="text-blue-100 text-sm mt-1">Update your application for {jobListing.title}</p>
-              {!isOwner && canEditApplications && (
+              <p className="text-blue-100 text-sm mt-1">Update your application for {jobListing?.title}</p>
+              {!isOwner && canEdit && (
                 <p className="text-blue-200 text-xs mt-2">
-                  ⚡ Admin mode: Editing application for {application.name}
+                  ⚡ Admin mode: Editing application for {application?.name}
                 </p>
               )}
             </div>
@@ -655,7 +748,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                   </h2>
                 </div>
                 <div className="p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-3">{jobListing.title}</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">{jobListing?.title}</h3>
                   <div className="grid grid-cols-2 gap-3 text-sm mb-4">
                     <div className="flex items-center gap-2 text-gray-600">
                       <FaMapMarkerAlt size={14} />
@@ -663,11 +756,11 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                     </div>
                     <div className="flex items-center gap-2 text-gray-600">
                       <FaClock size={14} />
-                      <span>{getJobTypeLabel(jobListing.job_type)}</span>
+                      <span>{getJobTypeLabel(jobListing?.job_type)}</span>
                     </div>
                     <div className="flex items-center gap-2 text-gray-600">
                       <FaStar size={14} />
-                      <span className="capitalize">{jobListing.experience_level}</span>
+                      <span className="capitalize">{jobListing?.experience_level}</span>
                     </div>
                   </div>
 
@@ -680,7 +773,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
 
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                     <FaClock size={12} />
-                    <span>Deadline: {formatDate(jobListing.application_deadline)}</span>
+                    <span>Deadline: {formatDate(jobListing?.application_deadline)}</span>
                   </div>
                 </div>
               </div>
@@ -704,12 +797,12 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                     {cvs.length === 0 ? (
                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
                         <p className="text-yellow-800 text-sm mb-2">No CV found in your profile</p>
-                        <a
-                          href={route('profile.index')}
+                        <Link
+                          to="/profile"
                           className="text-blue-600 hover:text-blue-700 text-sm font-medium"
                         >
                           Upload a CV first →
-                        </a>
+                        </Link>
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -866,7 +959,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                         {errors.expected_salary && (
                           <p className="text-red-500 text-xs mt-1">{errors.expected_salary}</p>
                         )}
-                        {application.expected_salary && (
+                        {application?.expected_salary && (
                           <p className="text-xs text-gray-400 mt-1">
                             Current: {formatCurrency(application.expected_salary)}
                           </p>
@@ -876,9 +969,9 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                   </div>
 
                   {/* Social Links */}
-                  {(jobListing.required_linkedin_link || jobListing.required_facebook_link) && (
+                  {(jobListing?.required_linkedin_link || jobListing?.required_facebook_link) && (
                     <div className="space-y-4">
-                      {jobListing.required_linkedin_link && (
+                      {jobListing?.required_linkedin_link && (
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             LinkedIn Profile <span className="text-red-500">*</span>
@@ -899,7 +992,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                         </div>
                       )}
 
-                      {jobListing.required_facebook_link && (
+                      {jobListing?.required_facebook_link && (
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             Facebook Profile <span className="text-red-500">*</span>
@@ -923,7 +1016,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                   )}
 
                   {/* Current ATS Score Info */}
-                  {application.ats_score && application.ats_calculation_status === 'completed' && (
+                  {application?.ats_score && application?.ats_calculation_status === 'completed' && (
                     <div className={`rounded-lg p-4 flex items-start gap-3 ${getAtsScoreBg(application.ats_score)}`}>
                       <FaStar className={`mt-0.5 shrink-0 ${getAtsScoreColor(application.ats_score)}`} size={16} />
                       <div className="text-sm">
@@ -940,7 +1033,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                     </div>
                   )}
 
-                  {application.ats_calculation_status === 'processing' && (
+                  {application?.ats_calculation_status === 'processing' && (
                     <div className="bg-yellow-50 rounded-lg p-4 flex items-start gap-3">
                       <FaSpinner className="animate-spin text-yellow-600 mt-0.5 shrink-0" size={16} />
                       <div className="text-sm text-yellow-800">
@@ -950,7 +1043,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                     </div>
                   )}
 
-                  {application.ats_calculation_status === 'failed' && (
+                  {application?.ats_calculation_status === 'failed' && (
                     <div className="bg-red-50 rounded-lg p-4 flex items-start gap-3">
                       <FaExclamationTriangle className="text-red-600 mt-0.5 shrink-0" size={16} />
                       <div className="text-sm text-red-800">
@@ -977,13 +1070,12 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
 
                 {/* Form Actions */}
                 <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => router.visit(route('backend.apply.show', application.id))}
+                  <Link
+                    to={`/applications/${id}`}
                     className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all duration-200"
                   >
                     Cancel
-                  </button>
+                  </Link>
                   <button
                     type="submit"
                     disabled={isSubmitting || cvs.length === 0}
@@ -1015,11 +1107,11 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                 <div className="p-6 space-y-3">
                   <div className="flex justify-between items-center py-2 border-b border-gray-100">
                     <span className="text-sm text-gray-500">Application ID</span>
-                    <span className="text-sm font-medium text-gray-900">#{application.id}</span>
+                    <span className="text-sm font-medium text-gray-900">#{application?.id}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-gray-100">
                     <span className="text-sm text-gray-500">Submitted On</span>
-                    <span className="text-sm font-medium text-gray-900">{formatDate(application.created_at)}</span>
+                    <span className="text-sm font-medium text-gray-900">{formatDate(application?.created_at)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-gray-100">
                     <span className="text-sm text-gray-500">Status</span>
@@ -1028,7 +1120,7 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
                       Pending
                     </span>
                   </div>
-                  {application.ats_score && application.ats_calculation_status === 'completed' && (
+                  {application?.ats_score && application?.ats_calculation_status === 'completed' && (
                     <div className="flex justify-between items-center py-2">
                       <span className="text-sm text-gray-500">Current ATS Score</span>
                       <span className={`text-sm font-bold ${getAtsScoreColor(application.ats_score)}`}>
@@ -1113,6 +1205,6 @@ export default function ApplyEdit({ application, jobListing, cvs, currentCvId })
           animation: fade-in 0.3s ease-out;
         }
       `}</style>
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

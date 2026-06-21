@@ -1,36 +1,22 @@
-// resources/js/Pages/Backend/ApplicantProfile/Modals/ChangePasswordModal.jsx
+// src/pages/Profile/Modals/ChangePasswordModal.jsx
+
 
 // React
 import { useState } from 'react';
 
-// Icons
-import { FaLock, FaEye, FaEyeSlash, FaSpinner } from 'react-icons/fa';
-
-// Components
-import Modal from './Modal';
+// Axios
+import axios from 'axios';
 
 // SweetAlert
 import Swal from 'sweetalert2';
 
-/**
- * ChangePasswordModal Component
- * 
- * Allows authenticated users to change their password.
- * Features:
- * - Current password verification
- * - New password with confirmation
- * - Password visibility toggle
- * - Validation error display
- * 
- * Note: This modal should only be available to the profile owner,
- * not to admins viewing other profiles.
- * 
- * @param {Object} props
- * @param {boolean} props.isOpen - Whether modal is open
- * @param {Function} props.onClose - Callback when modal closes
- * @param {Object} props.profile - User profile data (unused but kept for consistency)
- */
-const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
+// Modals
+import Modal from './Modal';
+
+// Icons
+import { FaLock, FaEye, FaEyeSlash } from 'react-icons/fa';
+
+export default function ChangePasswordModal({ isOpen, onClose }) {
   const [formData, setFormData] = useState({
     current_password: '',
     new_password: '',
@@ -43,79 +29,65 @@ const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
   });
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
+  const token = localStorage.getItem('token');
 
-  /**
-   * Handle input field changes
-   * @param {Event} e - Input change event
-   */
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
-    // Clear error for this field when user starts typing
     if (errors[e.target.name]) {
       setErrors({ ...errors, [e.target.name]: null });
     }
   };
 
-  /**
-   * Toggle password visibility for a specific field
-   * @param {string} field - Field name ('current', 'new', or 'confirm')
-   */
   const togglePasswordVisibility = (field) => {
     setShowPassword({ ...showPassword, [field]: !showPassword[field] });
   };
 
-  /**
-   * Submit password change request
-   * Sends POST request to change password endpoint
-   */
   const handleSubmit = async () => {
     setSaving(true);
     setErrors({});
 
     try {
-      const response = await fetch(route('backend.applicant.profile.change-password'), {
-        method: 'POST',
+      const response = await axios.post('/api/applicant-profiles/change-password', formData, {
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
           'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(formData)
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (data.errors) {
-          setErrors(data.errors);
-          throw new Error(Object.values(data.errors).flat()[0]);
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`,
         }
-        throw new Error(data.message || 'Failed to change password');
+      });
+
+      if (response.data.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Success!',
+          text: 'Password changed successfully!',
+          timer: 2000,
+          showConfirmButton: false
+        });
+
+        onClose();
+        setFormData({
+          current_password: '',
+          new_password: '',
+          new_password_confirmation: '',
+        });
+      } else {
+        throw new Error(response.data.message || 'Failed to change password');
       }
-
-      // Success
-      Swal.fire({
-        icon: 'success',
-        title: 'Success!',
-        text: 'Password changed successfully!',
-        timer: 2000,
-        showConfirmButton: false
-      });
-
-      onClose();
-      // Reset form
-      setFormData({
-        current_password: '',
-        new_password: '',
-        new_password_confirmation: '',
-      });
     } catch (error) {
-      Swal.fire({
-        icon: 'error',
-        title: 'Error!',
-        text: error.message,
-      });
+      if (error.response?.data?.errors) {
+        setErrors(error.response.data.errors);
+        Swal.fire({
+          icon: 'error',
+          title: 'Validation Error',
+          text: Object.values(error.response.data.errors).flat()[0],
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'Error!',
+          text: error.response?.data?.message || error.message || 'Failed to change password.',
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -126,7 +98,6 @@ const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
   return (
     <Modal title="Change Password" onClose={onClose} onSave={handleSubmit} saving={saving}>
       <div className="space-y-6">
-        {/* Header */}
         <div className="border-b border-gray-200 pb-4">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-blue-100 rounded-lg">
@@ -140,7 +111,6 @@ const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
         </div>
 
         <div className="space-y-4">
-          {/* Current Password Field */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Current Password
@@ -175,7 +145,6 @@ const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
             )}
           </div>
 
-          {/* New Password Field */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               New Password
@@ -211,7 +180,6 @@ const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
             <p className="mt-1 text-xs text-gray-500">Password must be at least 8 characters long</p>
           </div>
 
-          {/* Confirm New Password Field */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Confirm New Password
@@ -247,7 +215,6 @@ const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
           </div>
         </div>
 
-        {/* Password Requirements */}
         <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
           <p className="text-xs font-medium text-blue-800 mb-2">Password Requirements:</p>
           <ul className="text-xs text-blue-700 space-y-1">
@@ -259,6 +226,4 @@ const ChangePasswordModal = ({ isOpen, onClose, profile }) => {
       </div>
     </Modal>
   );
-};
-
-export default ChangePasswordModal;
+}

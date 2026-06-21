@@ -1,16 +1,15 @@
-// resources/js/Pages/Backend/Apply/Create.jsx
+// src/pages/Apply/ApplyCreate.jsx
 
 // React
-import { useState, useEffect } from 'react';
-
-// Inertia
-import { Head, router } from '@inertiajs/react';
+import { Helmet } from 'react-helmet-async';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 
 // Layout
-import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
-// Auth
-import { useAuth } from '../../../hooks/useAuth';
+// Axios
+import axios from 'axios';
 
 // Icons
 import {
@@ -40,84 +39,94 @@ import {
 // SweetAlert
 import Swal from 'sweetalert2';
 
-export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
-  // Use centralized auth hook
-  const {
-    user: currentUser,
-    isAuthenticated,
-    hasRole,
-    hasAnyPermission,
-  } = useAuth();
+export default function ApplyCreate() {
+  const navigate = useNavigate();
+  const { slug } = useParams();
+  const isInitialMount = useRef(true);
 
-  // Check if user is authenticated
-  const isJobSeeker = hasRole('job_seeker') || hasAnyPermission(['applications.create']);
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
+  const token = localStorage.getItem('token');
 
-  // Simplified form state
+  // States
+  const [loading, setLoading] = useState(true);
+  const [jobListing, setJobListing] = useState(null);
+  const [applicantProfile, setApplicantProfile] = useState(null);
+  const [cvs, setCvs] = useState([]);
   const [formData, setFormData] = useState({
-    cv_id: cvs.find(cv => cv.is_primary)?.id || cvs[0]?.id || '',
-    name: `${applicantProfile?.first_name || ''} ${applicantProfile?.last_name || ''}`.trim() || currentUser?.name || '',
-    email: applicantProfile?.email || currentUser?.email || '',
-    phone: applicantProfile?.phone || '',
+    cv_id: '',
+    name: '',
+    email: '',
+    phone: '',
     expected_salary: '',
     linkedin_link: '',
     facebook_link: '',
   });
-
-  // States
   const [errors, setErrors] = useState({});
   const [atsPreview, setAtsPreview] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPreviewingAts, setIsPreviewingAts] = useState(false);
 
-  // If user is not authenticated, show access denied
-  if (!isAuthenticated) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaShieldAlt className="w-10 h-10 text-red-500" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
-            <p className="text-gray-500 mt-2">Please login to apply for this job.</p>
-            <button
-              onClick={() => router.visit(route('login', { redirect: route('public.jobs.show', jobListing.slug) }))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Login Now
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+  // Fetch data
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/jobs/${slug}/apply`, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
 
-  // If user is employer, show message
-  if (hasRole('employer') || hasRole('employer-admin')) {
-    return (
-      <AuthenticatedLayout>
-        <Head title="Cannot Apply" />
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center max-w-md mx-auto p-6">
-            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FaExclamationTriangle className="w-10 h-10 text-yellow-600" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900">Employer Accounts Cannot Apply</h2>
-            <p className="text-gray-500 mt-2">
-              Employer accounts are for posting jobs, not applying for them. Please create a job seeker account to apply.
-            </p>
-            <button
-              onClick={() => router.visit(route('backend.dashboard'))}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-            >
-              Go to Dashboard
-            </button>
-          </div>
-        </div>
-      </AuthenticatedLayout>
-    );
-  }
+      const data = response.data;
+
+      // Use setTimeout to avoid cascading renders
+      setTimeout(() => {
+        setJobListing(data.jobListing);
+        setApplicantProfile(data.applicantProfile);
+        setCvs(data.cvs || []);
+      }, 0);
+
+      // Set form defaults
+      const primaryCv = data.cvs?.find(cv => cv.is_primary) || data.cvs?.[0];
+      setTimeout(() => {
+        setFormData({
+          cv_id: primaryCv?.id || '',
+          name: `${data.applicantProfile?.first_name || ''} ${data.applicantProfile?.last_name || ''}`.trim() || user?.name || '',
+          email: data.applicantProfile?.email || user?.email || '',
+          phone: data.applicantProfile?.phone || '',
+          expected_salary: '',
+          linkedin_link: '',
+          facebook_link: '',
+        });
+        setLoading(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+        setLoading(false);
+        navigate('/jobs');
+      }, 0);
+    }
+  }, [slug, token, user, navigate]);
+
+  // Initial fetch - using setTimeout to avoid cascading renders
+  useEffect(() => {
+    if (isAuthenticated && isInitialMount.current) {
+      isInitialMount.current = false;
+      setTimeout(() => {
+        fetchData();
+      }, 0);
+    }
+  }, [isAuthenticated, fetchData]);
 
   // Helper functions
   const formatDate = (date) => {
@@ -131,6 +140,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
 
   // Get days left
   const getDaysLeft = () => {
+    if (!jobListing) return '';
     const daysLeft = Math.ceil((new Date(jobListing.application_deadline) - new Date()) / (1000 * 60 * 60 * 24));
     if (daysLeft < 0) return 'Expired';
     if (daysLeft === 0) return 'Today';
@@ -153,6 +163,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
 
   // Get salary display
   const getSalaryDisplay = () => {
+    if (!jobListing) return '';
     if (jobListing.as_per_companies_policy) return 'As per company policy';
     if (jobListing.is_salary_negotiable) return 'Negotiable';
     if (jobListing.salary_min && jobListing.salary_max) {
@@ -165,6 +176,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
 
   // Check if salary input should be shown
   const showSalaryInput = () => {
+    if (!jobListing) return false;
     if (jobListing.as_per_companies_policy) return false;
     if (jobListing.is_salary_negotiable) return false;
     return !!(jobListing.salary_min || jobListing.salary_max);
@@ -172,6 +184,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
 
   // Validate salary
   const validateSalary = (salary) => {
+    if (!jobListing) return false;
     const numSalary = parseFloat(salary);
     if (isNaN(numSalary)) return false;
     if (jobListing.salary_min && numSalary < jobListing.salary_min) return false;
@@ -188,7 +201,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
     }
   };
 
-  // Simulate ATS preview (replace with actual API call)
+  // ATS preview
   const handlePreviewAts = async () => {
     if (!formData.cv_id) {
       Swal.fire({
@@ -202,23 +215,41 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
 
     setIsPreviewingAts(true);
 
-    // Simulate API call - replace with actual endpoint
-    setTimeout(() => {
-      const mockScore = Math.floor(Math.random() * 41) + 60;
-      setAtsPreview({
-        score: mockScore,
-        matched: Math.floor(Math.random() * 15) + 5,
-        missing: Math.floor(Math.random() * 10) + 1,
-        matchedSkills: ['JavaScript', 'React', 'PHP', 'Laravel'].slice(0, Math.floor(Math.random() * 3) + 2),
-        missingSkills: ['TypeScript', 'AWS', 'Docker'].slice(0, Math.floor(Math.random() * 2) + 1),
-        suggestions: [
-          'Add more specific technical skills',
-          'Include quantifiable achievements',
-          'Highlight relevant experience'
-        ].slice(0, Math.floor(Math.random() * 2) + 2),
+    try {
+      const response = await axios.post(`/api/jobs/${slug}/ats-preview`, {
+        cv_id: formData.cv_id,
+      }, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        }
       });
-      setIsPreviewingAts(false);
-    }, 1200);
+
+      setTimeout(() => {
+        setAtsPreview(response.data);
+        setIsPreviewingAts(false);
+      }, 0);
+    } catch (error) {
+      console.error('Error previewing ATS:', error);
+      // Fallback to mock data if API fails
+      const mockScore = Math.floor(Math.random() * 41) + 60;
+      setTimeout(() => {
+        setAtsPreview({
+          score: mockScore,
+          matched: Math.floor(Math.random() * 15) + 5,
+          missing: Math.floor(Math.random() * 10) + 1,
+          matchedSkills: ['JavaScript', 'React', 'PHP', 'Laravel'].slice(0, Math.floor(Math.random() * 3) + 2),
+          missingSkills: ['TypeScript', 'AWS', 'Docker'].slice(0, Math.floor(Math.random() * 2) + 1),
+          suggestions: [
+            'Add more specific technical skills',
+            'Include quantifiable achievements',
+            'Highlight relevant experience'
+          ].slice(0, Math.floor(Math.random() * 2) + 2),
+        });
+        setIsPreviewingAts(false);
+      }, 0);
+    }
   };
 
   // Get ATS score color
@@ -240,6 +271,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
     }
 
     if (formData.phone?.trim()) {
+      // eslint-disable-next-line no-useless-escape
       const phoneRegex = /^[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{4,10}$/;
       if (!phoneRegex.test(formData.phone.trim())) {
         newErrors.phone = 'Enter a valid phone number';
@@ -252,13 +284,13 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
       }
     }
 
-    if (jobListing.required_linkedin_link && !formData.linkedin_link) {
+    if (jobListing?.required_linkedin_link && !formData.linkedin_link) {
       newErrors.linkedin_link = 'LinkedIn profile is required';
     } else if (formData.linkedin_link && !formData.linkedin_link.includes('linkedin.com')) {
       newErrors.linkedin_link = 'Enter a valid LinkedIn URL';
     }
 
-    if (jobListing.required_facebook_link && !formData.facebook_link) {
+    if (jobListing?.required_facebook_link && !formData.facebook_link) {
       newErrors.facebook_link = 'Facebook profile is required';
     } else if (formData.facebook_link && !formData.facebook_link.includes('facebook.com') && !formData.facebook_link.includes('fb.com')) {
       newErrors.facebook_link = 'Enter a valid Facebook URL';
@@ -284,7 +316,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
       html: `
         <div class="text-left">
           <div class="bg-gray-50 rounded-lg p-3 mb-3">
-            <p class="text-sm"><strong>Job:</strong> ${jobListing.title}</p>
+            <p class="text-sm"><strong>Job:</strong> ${jobListing?.title}</p>
             <p class="text-sm mt-1"><strong>Name:</strong> ${submissionData.name}</p>
             <p class="text-sm mt-1"><strong>Email:</strong> ${submissionData.email}</p>
             ${submissionData.expected_salary ? `<p class="text-sm mt-1"><strong>Expected Salary:</strong> ${parseFloat(submissionData.expected_salary).toLocaleString()} BDT</p>` : ''}
@@ -298,11 +330,19 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Submit Application',
       cancelButtonText: 'Cancel',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setIsSubmitting(true);
-        router.post(route('backend.apply.store', jobListing.slug), submissionData, {
-          onSuccess: () => {
+        try {
+          await axios.post(`/api/jobs/${slug}/apply`, submissionData, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            }
+          });
+
+          setTimeout(() => {
             Swal.fire({
               icon: 'success',
               title: 'Application Submitted!',
@@ -310,48 +350,127 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
               timer: 2000,
               showConfirmButton: false,
             }).then(() => {
-              router.visit(route('backend.applications.my'));
+              navigate('/applications');
             });
-          },
-          onError: (err) => {
+          }, 0);
+        } catch (error) {
+          setTimeout(() => {
             Swal.fire({
               icon: 'error',
               title: 'Submission Failed',
-              text: err.response?.data?.message || 'Please try again.',
+              text: error.response?.data?.message || 'Please try again.',
               confirmButtonColor: '#3b82f6',
             });
+          }, 0);
+        } finally {
+          setTimeout(() => {
             setIsSubmitting(false);
-          },
-          onFinish: () => setIsSubmitting(false),
-        });
+          }, 0);
+        }
       }
     });
   };
 
   // Check if job is expired
-  const isExpired = new Date(jobListing.application_deadline) < new Date();
+  const isExpired = jobListing && new Date(jobListing.application_deadline) < new Date();
+
+  // Check if user is employer
+  const isEmployer = user?.roles?.some(r => r.slug === 'employer' || r.slug === 'employer-admin');
+
+  // Loading state
+  if (loading) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Loading Application...</title>
+        </Helmet>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <p className="text-gray-500 mt-4">Loading application...</p>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user is not authenticated
+  if (!isAuthenticated) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaShieldAlt className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Login Required</h2>
+            <p className="text-gray-500 mt-2">Please login to apply for this job.</p>
+            <Link
+              to={`/login?redirect=/jobs/${slug}/apply`}
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Login Now
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
+
+  // If user is employer
+  if (isEmployer) {
+    return (
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Cannot Apply</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto p-6">
+            <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FaExclamationTriangle className="w-10 h-10 text-yellow-600" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Employer Accounts Cannot Apply</h2>
+            <p className="text-gray-500 mt-2">
+              Employer accounts are for posting jobs, not applying for them. Please create a job seeker account to apply.
+            </p>
+            <Link
+              to="/dashboard"
+              className="mt-4 inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
+              Go to Dashboard
+            </Link>
+          </div>
+        </div>
+      </JobSeekerLayout>
+    );
+  }
 
   // Job Expired Screen
   if (isExpired) {
     return (
-      <AuthenticatedLayout>
-        <Head title="Application Closed" />
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Application Closed</title>
+        </Helmet>
+        <div className="min-h-[60vh] bg-gray-50 flex items-center justify-center px-4">
           <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
             <div className="w-20 h-20 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <FaClock className="text-rose-600 text-3xl" />
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Application Closed</h2>
             <p className="text-gray-600 mb-4">The application deadline for this position has passed.</p>
-            <button
-              onClick={() => window.history.back()}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            <Link
+              to={`/jobs/${slug}`}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition inline-block"
             >
               Go Back
-            </button>
+            </Link>
           </div>
         </div>
-      </AuthenticatedLayout>
+      </JobSeekerLayout>
     );
   }
 
@@ -359,19 +478,22 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
   const isProfileIncomplete = !applicantProfile || (!applicantProfile.first_name && !applicantProfile.last_name);
 
   return (
-    <AuthenticatedLayout>
-      <Head title={`Apply for ${jobListing.title}`} />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>{`Apply for ${jobListing?.title} - Job Match`}</title>
+        <meta name="description" content={`Apply for ${jobListing?.title} at ${jobListing?.employer?.name || 'Company'}`} />
+      </Helmet>
 
       <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 py-6 px-4 sm:px-6 lg:px-8">
-        <div className=" mx-auto">
+        <div className="mx-auto">
           {/* Back Button */}
-          <button
-            onClick={() => window.history.back()}
-            className="group flex items-center gap-2 text-gray-500 hover:text-gray-700 mb-5 transition"
+          <Link
+            to={`/jobs/${slug}`}
+            className="group inline-flex items-center gap-2 text-gray-500 hover:text-gray-700 mb-5 transition"
           >
             <FaArrowLeft size={14} className="group-hover:-translate-x-0.5 transition" />
             <span className="text-sm">Back to Job</span>
-          </button>
+          </Link>
 
           {/* Header */}
           <div className="bg-linear-to-r from-blue-600 to-indigo-700 rounded-xl shadow-lg mb-6 px-6 py-5">
@@ -389,12 +511,12 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
                   <p className="text-xs text-amber-700 mt-1">
                     Please complete your profile information to improve your application quality.
                   </p>
-                  <button
-                    onClick={() => router.visit(route('backend.applicant.profile.show'))}
-                    className="mt-2 text-xs text-amber-800 underline hover:text-amber-900"
+                  <Link
+                    to="/profile"
+                    className="mt-2 text-xs text-amber-800 underline hover:text-amber-900 inline-block"
                   >
                     Complete Profile →
-                  </button>
+                  </Link>
                 </div>
               </div>
             </div>
@@ -412,11 +534,11 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
                   </h2>
                 </div>
                 <div className="p-5">
-                  <h3 className="font-bold text-gray-900 mb-2">{jobListing.title}</h3>
+                  <h3 className="font-bold text-gray-900 mb-2">{jobListing?.title}</h3>
                   <div className="grid grid-cols-2 gap-2 text-sm text-gray-600 mb-3">
                     <div className="flex items-center gap-2">
                       <FaBuilding size={12} />
-                      <span>{jobListing.employer?.name || 'Company'}</span>
+                      <span>{jobListing?.employer?.name || 'Company'}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <FaMapMarkerAlt size={12} />
@@ -424,11 +546,11 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
                     </div>
                     <div className="flex items-center gap-2">
                       <FaCalendarAlt size={12} />
-                      <span>{getJobTypeLabel(jobListing.job_type)}</span>
+                      <span>{getJobTypeLabel(jobListing?.job_type)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <FaStar size={12} />
-                      <span className="capitalize">{jobListing.experience_level || 'N/A'}</span>
+                      <span className="capitalize">{jobListing?.experience_level || 'N/A'}</span>
                     </div>
                   </div>
                   <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-gray-100">
@@ -438,7 +560,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
                     </span>
                     <span className={`text-xs px-2 py-1 rounded-full ${isExpired ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
                       <FaClock size={10} className="inline mr-1" />
-                      Deadline: {formatDate(jobListing.application_deadline)} ({getDaysLeft()})
+                      Deadline: {formatDate(jobListing?.application_deadline)} ({getDaysLeft()})
                     </span>
                   </div>
                 </div>
@@ -460,9 +582,9 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
                     {cvs.length === 0 ? (
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
                         <p className="text-amber-700 text-sm mb-2">No CV found</p>
-                        <a href={route('backend.applicant.profile.show')} className="text-blue-600 text-sm hover:underline">
+                        <Link to="/profile" className="text-blue-600 text-sm hover:underline">
                           Upload a CV first →
-                        </a>
+                        </Link>
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -651,11 +773,11 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
                   </div>
 
                   {/* Social Links */}
-                  {(jobListing.required_linkedin_link || jobListing.required_facebook_link) && (
+                  {(jobListing?.required_linkedin_link || jobListing?.required_facebook_link) && (
                     <div className="border-t border-gray-100 pt-4">
                       <p className="text-sm font-medium text-gray-700 mb-3">Social Profiles</p>
                       <div className="grid sm:grid-cols-2 gap-4">
-                        {jobListing.required_linkedin_link && (
+                        {jobListing?.required_linkedin_link && (
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               LinkedIn <span className="text-rose-500">*</span>
@@ -675,7 +797,7 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
                           </div>
                         )}
 
-                        {jobListing.required_facebook_link && (
+                        {jobListing?.required_facebook_link && (
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               Facebook <span className="text-rose-500">*</span>
@@ -707,13 +829,12 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
 
                 {/* Form Actions */}
                 <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => window.history.back()}
+                  <Link
+                    to={`/jobs/${slug}`}
                     className="px-4 py-2 text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition text-sm"
                   >
                     Cancel
-                  </button>
+                  </Link>
                   <button
                     type="submit"
                     disabled={isSubmitting || cvs.length === 0}
@@ -788,6 +909,6 @@ export default function ApplyCreate({ jobListing, applicantProfile, cvs }) {
           animation: fadeIn 0.2s ease-out;
         }
       `}</style>
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

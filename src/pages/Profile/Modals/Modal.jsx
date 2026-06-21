@@ -1,4 +1,4 @@
-// resources/js/Pages/Backend/ApplicantProfile/Modals/Modal.jsx
+// src/pages/Profile/Modals/Modal.jsx
 
 import { FaTimes, FaSave, FaSpinner } from 'react-icons/fa';
 

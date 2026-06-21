@@ -1,17 +1,15 @@
-// resources/js/Pages/Public/JobListings/Index.jsx
+// src/pages/Jobs/PublicJobListings.jsx
 
 // React
-import { useState, useEffect } from 'react';
-
-// Inertia
-import { Head, router, usePage } from '@inertiajs/react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 
 // Layout
-import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
-// Auth
-import { useAuth } from '../../../hooks/useAuth';
-import { Can } from '../../../components/Auth/Can';
+// Axios
+import axios from 'axios';
 
 // Icons
 import {
@@ -39,30 +37,29 @@ import {
 // SweetAlert
 import Swal from 'sweetalert2';
 
-export default function PublicJobListingsIndex({
-  jobListings: initialJobListings,
-  categories,
-  locations,
-  jobTypes,
-  experienceLevels,
-  salaryRange,
-  filters: initialFilters = {},
-  stats,
-}) {
-  const { flash } = usePage().props;
+export default function PublicJobListings() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isInitialMount = useRef(true);
 
-  // Use centralized auth hook
-  const {
-    user: currentUser,
-    isAuthenticated,
-    hasRole,
-    hasAnyPermission,
-  } = useAuth();
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
+  const token = localStorage.getItem('token');
 
-  // Check user roles/permissions
-  const isEmployer = hasRole('employer') || hasRole('employer-admin');
-  const canPostJobs = hasAnyPermission(['jobs.create', 'jobs.manage']);
-  const isSuperAdmin = hasRole('super-admin');
+  // Get query params
+  const queryParams = new URLSearchParams(location.search);
+  const initialSearch = queryParams.get('search') || '';
+  const initialCategory = queryParams.get('category') || '';
+  const initialLocation = queryParams.get('location') || '';
+  const initialJobType = queryParams.get('job_type') || '';
+  const initialSalaryMin = queryParams.get('salary_min') || '';
+  const initialSalaryMax = queryParams.get('salary_max') || '';
+  const initialSort = queryParams.get('sort') || 'latest';
+  const initialExperienceLevel = queryParams.get('experience_level') || '';
+
+  // Get page
+  const initialPage = parseInt(queryParams.get('page')) || 1;
 
   // States
   const [loading, setLoading] = useState(false);
@@ -70,70 +67,134 @@ export default function PublicJobListingsIndex({
   const [savingJobId, setSavingJobId] = useState(null);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
-  const [jobListings, setJobListings] = useState(initialJobListings);
+  const [jobListings, setJobListings] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [jobTypes, setJobTypes] = useState([]);
+  const [experienceLevels, setExperienceLevels] = useState([]);
+  const [salaryRange, setSalaryRange] = useState({ min: 0, max: 1000000 });
+  const [stats, setStats] = useState({
+    total_jobs: 0,
+    total_views: 0,
+    total_applications: 0,
+  });
 
   // Filter states
   const [filters, setFilters] = useState({
-    search: initialFilters.search || '',
-    category: initialFilters.category || '',
-    location: initialFilters.location || '',
-    job_type: initialFilters.job_type || '',
-    experience_level: initialFilters.experience_level || '',
-    salary_min: initialFilters.salary_min || '',
-    salary_max: initialFilters.salary_max || '',
-    sort: initialFilters.sort || 'latest',
+    search: initialSearch,
+    category: initialCategory,
+    location: initialLocation,
+    job_type: initialJobType,
+    experience_level: initialExperienceLevel,
+    salary_min: initialSalaryMin,
+    salary_max: initialSalaryMax,
+    sort: initialSort,
   });
 
-  // Get job listings array from paginated response
-  const jobListingItems = jobListings?.data || [];
+  // Fetch all data
+  const fetchData = useCallback(async (page = initialPage) => {
+    setLoading(true);
+    try {
+      // Build query string
+      const params = new URLSearchParams();
+      if (filters.search) params.append('search', filters.search);
+      if (filters.category) params.append('category', filters.category);
+      if (filters.location) params.append('location', filters.location);
+      if (filters.job_type) params.append('job_type', filters.job_type);
+      if (filters.experience_level) params.append('experience_level', filters.experience_level);
+      if (filters.salary_min) params.append('salary_min', filters.salary_min);
+      if (filters.salary_max) params.append('salary_max', filters.salary_max);
+      if (filters.sort) params.append('sort', filters.sort);
+      if (page > 1) params.append('page', page);
 
-  // Pagination info
-  const pagination = jobListings && {
-    currentPage: jobListings.current_page,
-    lastPage: jobListings.last_page,
-    perPage: jobListings.per_page,
-    total: jobListings.total,
-    from: jobListings.from,
-    to: jobListings.to,
-  };
+      const response = await axios.get(`/api/jobs?${params.toString()}`, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        }
+      });
+
+      const data = response.data;
+
+      // Use setTimeout to avoid cascading renders
+      setTimeout(() => {
+        setJobListings(data.jobListings);
+        setCategories(data.categories || []);
+        setLocations(data.locations || []);
+        setJobTypes(data.jobTypes || []);
+        setExperienceLevels(data.experienceLevels || []);
+        setSalaryRange(data.salaryRange || { min: 0, max: 1000000 });
+        setStats(data.stats || { total_jobs: 0, total_views: 0, total_applications: 0 });
+      }, 0);
+
+      // Update URL
+      const searchParams = new URLSearchParams();
+      if (filters.search) searchParams.append('search', filters.search);
+      if (filters.category) searchParams.append('category', filters.category);
+      if (filters.location) searchParams.append('location', filters.location);
+      if (filters.job_type) searchParams.append('job_type', filters.job_type);
+      if (filters.experience_level) searchParams.append('experience_level', filters.experience_level);
+      if (filters.salary_min) searchParams.append('salary_min', filters.salary_min);
+      if (filters.salary_max) searchParams.append('salary_max', filters.salary_max);
+      if (filters.sort) searchParams.append('sort', filters.sort);
+      if (page > 1) searchParams.append('page', page);
+
+      navigate({
+        pathname: location.pathname,
+        search: searchParams.toString(),
+      }, { replace: true });
+
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load jobs',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+      }, 0);
+    } finally {
+      setTimeout(() => {
+        setLoading(false);
+      }, 0);
+    }
+  }, [filters, token, location.pathname, navigate, initialPage]);
+
+  // Initial fetch - using setTimeout to avoid cascading renders
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      setTimeout(() => {
+        fetchData(initialPage);
+      }, 0);
+    }
+  }, [fetchData, initialPage]);
 
   // Apply filters
-  const applyFilters = () => {
-    setLoading(true);
-    router.get(route('public.jobs.index'), filters, {
-      preserveState: true,
-      preserveScroll: true,
-      replace: true,
-      onSuccess: (page) => {
-        setJobListings(page.props.jobListings);
-        setLoading(false);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      },
-      onError: () => {
-        setLoading(false);
-      },
-    });
-  };
+  const applyFilters = useCallback(() => {
+    setTimeout(() => {
+      fetchData(1);
+    }, 0);
+    setShowMobileFilters(false);
+  }, [fetchData]);
 
   // Debounced search
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      if (filters.search !== initialFilters.search) {
-        applyFilters();
+      if (filters.search !== initialSearch) {
+        setTimeout(() => {
+          fetchData(1);
+        }, 0);
       }
     }, 500);
     return () => clearTimeout(timeoutId);
-  }, [filters.search]);
+  }, [filters.search, initialSearch, fetchData]);
 
   // Handle filter change
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
-  };
-
-  // Apply all filters
-  const handleApplyFilters = () => {
-    applyFilters();
-    setShowMobileFilters(false);
   };
 
   // Reset all filters
@@ -148,34 +209,24 @@ export default function PublicJobListingsIndex({
       salary_max: '',
       sort: 'latest',
     });
+    setTimeout(() => fetchData(1), 0);
   };
 
   // Handle sort change
   const handleSortChange = (sortValue) => {
     setFilters(prev => ({ ...prev, sort: sortValue }));
     setShowSortMenu(false);
-    applyFilters();
+    setTimeout(() => fetchData(1), 0);
   };
 
   // Handle page change
   const handlePageChange = (page) => {
-    if (page === pagination?.currentPage) return;
-    if (page < 1 || page > pagination?.lastPage) return;
-
-    setLoading(true);
-    router.get(route('public.jobs.index'), { ...filters, page }, {
-      preserveState: true,
-      preserveScroll: true,
-      replace: true,
-      onSuccess: (page) => {
-        setJobListings(page.props.jobListings);
-        setLoading(false);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      },
-      onError: () => {
-        setLoading(false);
-      },
-    });
+    if (page === jobListings?.current_page) return;
+    if (page < 1 || page > jobListings?.last_page) return;
+    setTimeout(() => {
+      fetchData(page);
+    }, 0);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Save/Unsave job
@@ -191,7 +242,7 @@ export default function PublicJobListingsIndex({
         cancelButtonText: 'Cancel',
       }).then((result) => {
         if (result.isConfirmed) {
-          router.visit(route('login'));
+          navigate('/login');
         }
       });
       return;
@@ -201,46 +252,56 @@ export default function PublicJobListingsIndex({
 
     try {
       const isSaved = savedJobs.includes(jobId);
-      const response = await router.post(route('public.jobs.save', jobId), {}, {
-        preserveScroll: true,
-        onSuccess: () => {
-          if (isSaved) {
-            setSavedJobs(prev => prev.filter(id => id !== jobId));
-            Swal.fire({
-              icon: 'success',
-              title: 'Removed',
-              text: 'Job removed from saved list.',
-              timer: 1500,
-              showConfirmButton: false,
-            });
-          } else {
-            setSavedJobs(prev => [...prev, jobId]);
-            Swal.fire({
-              icon: 'success',
-              title: 'Saved!',
-              text: 'Job saved to your profile.',
-              timer: 1500,
-              showConfirmButton: false,
-            });
-          }
-        },
-        onError: (error) => {
-          Swal.fire({
-            icon: 'error',
-            title: 'Error',
-            text: error?.message || 'Failed to save job.',
-          });
-        },
-        onFinish: () => setSavingJobId(null),
+
+      // Optimistic update
+      if (isSaved) {
+        setSavedJobs(prev => prev.filter(id => id !== jobId));
+      } else {
+        setSavedJobs(prev => [...prev, jobId]);
+      }
+
+      // Make API call
+      await axios.post(`/api/jobs/${jobId}/save`, {}, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        }
       });
+
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'success',
+          title: isSaved ? 'Removed' : 'Saved!',
+          text: isSaved ? 'Job removed from saved list.' : 'Job saved to your profile.',
+          timer: 1500,
+          showConfirmButton: false,
+        });
+      }, 0);
     } catch (error) {
+      // Revert optimistic update on error
+      const isSaved = savedJobs.includes(jobId);
+      if (isSaved) {
+        setSavedJobs(prev => prev.filter(id => id !== jobId));
+      } else {
+        setSavedJobs(prev => [...prev, jobId]);
+      }
+
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: error.response?.data?.message || 'Failed to save job.',
+        });
+      }, 0);
+    } finally {
       setSavingJobId(null);
     }
   };
 
   // Share job
   const handleShareJob = (job) => {
-    const url = window.location.origin + route('public.jobs.show', job.slug);
+    const url = window.location.origin + `/jobs/${job.slug}`;
 
     if (navigator.share) {
       navigator.share({
@@ -250,13 +311,15 @@ export default function PublicJobListingsIndex({
       }).catch(() => { });
     } else {
       navigator.clipboard.writeText(url);
-      Swal.fire({
-        icon: 'success',
-        title: 'Link Copied!',
-        text: 'Job link copied to clipboard.',
-        timer: 1500,
-        showConfirmButton: false,
-      });
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'success',
+          title: 'Link Copied!',
+          text: 'Job link copied to clipboard.',
+          timer: 1500,
+          showConfirmButton: false,
+        });
+      }, 0);
     }
   };
 
@@ -269,6 +332,7 @@ export default function PublicJobListingsIndex({
   // Clear single filter
   const clearFilter = (key) => {
     setFilters(prev => ({ ...prev, [key]: '' }));
+    setTimeout(() => fetchData(1), 0);
   };
 
   // Format date
@@ -328,35 +392,30 @@ export default function PublicJobListingsIndex({
     return sorts[filters.sort] || 'Latest Jobs';
   };
 
-  // Show flash messages
-  useEffect(() => {
-    if (flash?.success) {
-      Swal.fire({
-        icon: 'success',
-        title: 'Success!',
-        text: flash.success,
-        timer: 3000,
-        showConfirmButton: false,
-      });
-    }
-    if (flash?.error) {
-      Swal.fire({
-        icon: 'error',
-        title: 'Error!',
-        text: flash.error,
-        confirmButtonColor: '#2563eb',
-      });
-    }
-  }, [flash]);
+  // Get job listings array from paginated response
+  const jobListingItems = jobListings?.data || [];
+
+  // Pagination info
+  const pagination = jobListings && {
+    currentPage: jobListings.current_page,
+    lastPage: jobListings.last_page,
+    perPage: jobListings.per_page,
+    total: jobListings.total,
+    from: jobListings.from,
+    to: jobListings.to,
+  };
 
   return (
-    <AuthenticatedLayout>
-      <Head title="Find Your Dream Job" />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>Find Your Dream Job - Job Match</title>
+        <meta name="description" content="Browse thousands of job opportunities and find your dream career" />
+      </Helmet>
 
       <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100">
         {/* Hero Section */}
         <div className="bg-linear-to-r from-blue-600 to-indigo-700 text-white py-12">
-          <div className=" mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center">
               <h1 className="text-3xl md:text-4xl font-bold mb-3">
                 Find Your Dream Job
@@ -383,7 +442,7 @@ export default function PublicJobListingsIndex({
         </div>
 
         {/* Main Content */}
-        <div className=" mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex flex-col lg:flex-row gap-6">
             {/* Sidebar Filters - Desktop */}
             <div className="hidden lg:block w-80 shrink-0">
@@ -419,7 +478,7 @@ export default function PublicJobListingsIndex({
                       <option value="">All Categories</option>
                       {categories.map(cat => (
                         <option key={cat.id} value={cat.slug}>
-                          {cat.name} ({cat.job_listings_count})
+                          {cat.name} ({cat.job_listings_count || 0})
                         </option>
                       ))}
                     </select>
@@ -438,7 +497,7 @@ export default function PublicJobListingsIndex({
                       <option value="">All Locations</option>
                       {locations.map(loc => (
                         <option key={loc.id} value={loc.id}>
-                          {loc.name} ({loc.job_listings_count})
+                          {loc.name} ({loc.job_listings_count || 0})
                         </option>
                       ))}
                     </select>
@@ -507,7 +566,7 @@ export default function PublicJobListingsIndex({
 
                   {/* Apply Button */}
                   <button
-                    onClick={handleApplyFilters}
+                    onClick={applyFilters}
                     className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition font-medium"
                   >
                     Apply Filters
@@ -570,7 +629,7 @@ export default function PublicJobListingsIndex({
                   </select>
 
                   <button
-                    onClick={handleApplyFilters}
+                    onClick={applyFilters}
                     className="w-full bg-blue-600 text-white py-2 rounded-lg"
                   >
                     Apply Filters
@@ -593,7 +652,7 @@ export default function PublicJobListingsIndex({
                 {isAuthenticated && (
                   <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full">
                     <FaUserCheck size={14} />
-                    <span>Welcome back, {currentUser?.name}!</span>
+                    <span>Welcome back, {user?.name}!</span>
                   </div>
                 )}
 
@@ -704,7 +763,6 @@ export default function PublicJobListingsIndex({
                 <div className="space-y-4">
                   {jobListingItems.map((job, index) => {
                     const isSaved = savedJobs.includes(job.id);
-                    const isJobOwner = isEmployer && currentUser?.employer_id === job.employer_id;
 
                     return (
                       <div
@@ -718,9 +776,9 @@ export default function PublicJobListingsIndex({
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-2 flex-wrap">
                                 <h2 className="text-xl font-bold text-gray-900 hover:text-blue-600 transition">
-                                  <a href={route('public.jobs.show', job.slug)}>
+                                  <Link to={`/jobs/${job.slug}`}>
                                     {job.title}
-                                  </a>
+                                  </Link>
                                 </h2>
                                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getJobTypeColor(job.job_type)}`}>
                                   {job.job_type?.replace('-', ' ').toUpperCase()}
@@ -728,12 +786,6 @@ export default function PublicJobListingsIndex({
                                 {job.experience_level && (
                                   <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
                                     {job.experience_level}
-                                  </span>
-                                )}
-                                {isJobOwner && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-700">
-                                    <FaBuilding size={10} />
-                                    Your Job
                                   </span>
                                 )}
                               </div>
@@ -820,13 +872,13 @@ export default function PublicJobListingsIndex({
                                 </button>
 
                                 {/* Apply Button */}
-                                <a
-                                  href={route('public.jobs.show', job.slug)}
+                                <Link
+                                  to={`/jobs/${job.slug}`}
                                   className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium"
                                 >
                                   View Details
                                   <FaChevronRight size={12} />
-                                </a>
+                                </Link>
                               </div>
                             </div>
                           </div>
@@ -955,6 +1007,6 @@ export default function PublicJobListingsIndex({
           overflow: hidden;
         }
       `}</style>
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

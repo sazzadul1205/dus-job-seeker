@@ -1,19 +1,18 @@
-// resources/js/Pages/Backend/Notifications/Index.jsx
+// src/pages/Notifications/Notification.jsx
 
 // React
-import { useState } from 'react';
-
-// Inertia
-import { Head, Link, router } from '@inertiajs/react';
+import { useState, useEffect, useCallback } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { Link } from 'react-router-dom';
 
 // Layout
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import JobSeekerLayout from '../../Layout/JobSeekerLayout';
 
 // Sweetalert
 import Swal from 'sweetalert2';
 
-// Auth
-import { useAuth } from '@/hooks/useAuth';
+// Axios
+import axios from 'axios';
 
 // Icons
 import {
@@ -22,47 +21,80 @@ import {
   FiClock,
   FiInbox,
   FiAlertCircle,
-  FiRefreshCw,
 } from 'react-icons/fi';
 import { FaSpinner } from 'react-icons/fa';
 
-export default function Index({ notifications }) {
-  // Use centralized auth hook
-  const {
-    user: currentUser,
-    isAuthenticated,
-    hasAnyPermission,
-    hasRole,
-  } = useAuth();
+export default function NotificationsIndex() {
 
-  // Check if user is authenticated to view notifications
-  const canViewNotifications = isAuthenticated;
-
-  // Get notifications
-  const items = notifications?.data || [];
-
-  // Get pagination
-  const pagination = notifications && {
-    currentPage: notifications.current_page,
-    lastPage: notifications.last_page,
-    perPage: notifications.per_page,
-    total: notifications.total,
-    from: notifications.from,
-    to: notifications.to,
-  };
+  // Get user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const isAuthenticated = !!user;
 
   // State
+  const [notifications, setNotifications] = useState({
+    data: [],
+    current_page: 1,
+    last_page: 1,
+    per_page: 10,
+    total: 0,
+    from: 0,
+    to: 0,
+  });
   const [loading, setLoading] = useState(false);
   const [isMarking, setIsMarking] = useState({});
   const [isMarkingAll, setIsMarkingAll] = useState(false);
-  const [currentPage, setCurrentPage] = useState(notifications?.current_page || 1);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Fetch notifications - wrapped in useCallback
+  const fetchNotifications = useCallback(async (page = 1) => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/notifications?page=${page}`, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        }
+      });
+      // Use setTimeout to avoid cascading renders
+      setTimeout(() => {
+        setNotifications(response.data);
+        setCurrentPage(page);
+      }, 0);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      setTimeout(() => {
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to load notifications',
+          text: error.response?.data?.message || 'Something went wrong.',
+          confirmButtonColor: '#d33',
+        });
+      }, 0);
+    } finally {
+      setTimeout(() => {
+        setLoading(false);
+      }, 0);
+    }
+  }, []);
+
+  // Initial fetch - using setTimeout to avoid cascading renders
+  useEffect(() => {
+    if (isAuthenticated) {
+      setTimeout(() => {
+        fetchNotifications(1);
+      }, 0);
+    }
+  }, [isAuthenticated, fetchNotifications]);
 
   // If user is not authenticated, show access denied
-  if (!canViewNotifications) {
+  if (!isAuthenticated) {
     return (
-      <AuthenticatedLayout>
-        <Head title="Access Denied" />
-        <div className="min-h-screen flex items-center justify-center">
+      <JobSeekerLayout>
+        <Helmet>
+          <title>Access Denied - Job Match</title>
+        </Helmet>
+        <div className="min-h-[60vh] flex items-center justify-center">
           <div className="text-center">
             <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <FiAlertCircle className="w-10 h-10 text-red-500" />
@@ -70,16 +102,29 @@ export default function Index({ notifications }) {
             <h2 className="text-xl font-semibold text-gray-900">Access Denied</h2>
             <p className="text-gray-500 mt-2">Please login to view your notifications.</p>
             <Link
-              href={route('login')}
+              to="/login"
               className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
             >
               Login Now
             </Link>
           </div>
         </div>
-      </AuthenticatedLayout>
+      </JobSeekerLayout>
     );
   }
+
+  // Get items from notifications
+  const items = notifications?.data || [];
+
+  // Get pagination
+  const pagination = {
+    currentPage: notifications.current_page || 1,
+    lastPage: notifications.last_page || 1,
+    perPage: notifications.per_page || 10,
+    total: notifications.total || 0,
+    from: notifications.from || 0,
+    to: notifications.to || 0,
+  };
 
   // Handle mark all as read
   const handleMarkAllRead = () => {
@@ -102,74 +147,74 @@ export default function Index({ notifications }) {
       cancelButtonColor: '#6b7280',
       confirmButtonText: 'Yes, mark all',
       cancelButtonText: 'Cancel',
-    }).then((result) => {
+    }).then(async (result) => {
       if (result.isConfirmed) {
         setIsMarkingAll(true);
-        router.post(route('backend.notifications.read-all'), {}, {
-          preserveScroll: true,
-          onSuccess: () => {
-            Swal.fire({
-              icon: 'success',
-              title: 'Updated!',
-              text: 'All notifications marked as read.',
-              timer: 1500,
-              showConfirmButton: false,
-            });
-            router.reload({ preserveScroll: true });
-          },
-          onError: (error) => {
-            Swal.fire({
-              icon: 'error',
-              title: 'Failed',
-              text: error?.message || 'Failed to mark notifications as read.',
-              confirmButtonColor: '#d33',
-            });
-          },
-          onFinish: () => setIsMarkingAll(false),
-        });
+        try {
+          await axios.post('/api/notifications/read-all', {}, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            }
+          });
+
+          Swal.fire({
+            icon: 'success',
+            title: 'Updated!',
+            text: 'All notifications marked as read.',
+            timer: 1500,
+            showConfirmButton: false,
+          });
+
+          // Refetch notifications
+          fetchNotifications(currentPage);
+        } catch (error) {
+          Swal.fire({
+            icon: 'error',
+            title: 'Failed',
+            text: error.response?.data?.message || 'Failed to mark notifications as read.',
+            confirmButtonColor: '#d33',
+          });
+        } finally {
+          setIsMarkingAll(false);
+        }
       }
     });
   };
 
   // Handle mark as read
-  const handleMarkRead = (id) => {
+  const handleMarkRead = async (id) => {
     setIsMarking(prev => ({ ...prev, [id]: true }));
-    router.post(route('backend.notifications.read', id), {}, {
-      preserveScroll: true,
-      onSuccess: () => {
-        router.reload({ preserveScroll: true });
-      },
-      onError: (error) => {
-        Swal.fire({
-          icon: 'error',
-          title: 'Failed',
-          text: error?.message || 'Failed to mark notification as read.',
-          confirmButtonColor: '#d33',
-        });
-      },
-      onFinish: () => {
-        setIsMarking(prev => ({ ...prev, [id]: false }));
-      },
-    });
+    try {
+      await axios.post(`/api/notifications/${id}/read`, {}, {
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        }
+      });
+
+      // Refetch notifications
+      fetchNotifications(currentPage);
+    } catch (error) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Failed',
+        text: error.response?.data?.message || 'Failed to mark notification as read.',
+        confirmButtonColor: '#d33',
+      });
+    } finally {
+      setIsMarking(prev => ({ ...prev, [id]: false }));
+    }
   };
 
   // Handle page change
   const handlePageChange = (page) => {
     if (page === currentPage) return;
-    if (page < 1 || page > pagination?.lastPage) return;
-
-    setLoading(true);
-    router.get(route('backend.notifications.index'), { page }, {
-      preserveState: true,
-      preserveScroll: true,
-      replace: true,
-      onSuccess: () => {
-        setCurrentPage(page);
-        setLoading(false);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      },
-      onError: () => setLoading(false),
-    });
+    if (page < 1 || page > pagination.lastPage) return;
+    fetchNotifications(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Get unread count
@@ -177,7 +222,7 @@ export default function Index({ notifications }) {
     return items.filter(n => !n.read_at).length;
   };
 
-  // Pagination
+  // Pagination Component
   const Pagination = () => {
     if (!pagination || pagination.lastPage <= 1) return null;
 
@@ -207,8 +252,8 @@ export default function Index({ notifications }) {
             onClick={() => handlePageChange(currentPage - 1)}
             disabled={currentPage === 1 || loading}
             className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 transition ${currentPage === 1 || loading
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
               }`}
           >
             Previous
@@ -233,8 +278,8 @@ export default function Index({ notifications }) {
               onClick={() => handlePageChange(page)}
               disabled={loading}
               className={`px-3 py-1.5 rounded-lg text-sm transition ${page === currentPage
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
                 }`}
             >
               {page}
@@ -258,8 +303,8 @@ export default function Index({ notifications }) {
             onClick={() => handlePageChange(currentPage + 1)}
             disabled={currentPage === pagination.lastPage || loading}
             className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 transition ${currentPage === pagination.lastPage || loading
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
               }`}
           >
             Next
@@ -269,14 +314,16 @@ export default function Index({ notifications }) {
     );
   };
 
-  // Get unread count
   const unreadCount = getUnreadCount();
 
   return (
-    <AuthenticatedLayout>
-      <Head title="Notifications" />
+    <JobSeekerLayout>
+      <Helmet>
+        <title>Notifications - Job Match</title>
+        <meta name="description" content="View and manage your notifications" />
+      </Helmet>
 
-      <div className=" mx-auto p-4 md:p-6">
+      <div className="mx-auto p-4 md:p-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-6 border-b border-gray-100 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -401,7 +448,7 @@ export default function Index({ notifications }) {
 
                         {data.route_name && (
                           <Link
-                            href={route(data.route_name, data.route_params || {})}
+                            to={`/${data.route_name}`}
                             className="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-black transition-colors"
                           >
                             View details
@@ -418,6 +465,6 @@ export default function Index({ notifications }) {
           <Pagination />
         </div>
       </div>
-    </AuthenticatedLayout>
+    </JobSeekerLayout>
   );
 }

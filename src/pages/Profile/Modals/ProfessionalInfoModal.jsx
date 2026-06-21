@@ -1,8 +1,18 @@
-// resources/js/Pages/Backend/ApplicantProfile/Modals/ProfessionalInfoModal.jsx
+// src/pages/Profile/Modals/ProfessionalInfoModal.jsx
 
+// React
 import { useState } from 'react';
+
+// Axios
+import axios from 'axios';
+
+// SweetAlert
 import Swal from 'sweetalert2';
+
+// Modals
 import Modal from './Modal';
+
+// Icons
 import {
   FaBriefcase,
   FaLink,
@@ -19,29 +29,12 @@ import {
   FaStackOverflow,
   FaTrash,
   FaPlus,
-  FaSpinner
 } from 'react-icons/fa';
 
-/**
- * ProfessionalInfoModal Component
- * 
- * Allows users to manage their professional information including:
- * - Years of experience
- * - Current job title
- * - Social media/professional profile links
- * 
- * Features:
- * - Add/remove social links from multiple platforms
- * - Edit experience level and job title
- * - Preview added social links
- * 
- * @param {Object} props
- * @param {boolean} props.isOpen - Whether modal is open
- * @param {Function} props.onClose - Callback when modal closes
- * @param {Object} props.profile - User profile data
- */
-const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
+export default function ProfessionalInfoModal({ isOpen, onClose, profile }) {
   const [saving, setSaving] = useState(false);
+  const token = localStorage.getItem('token');
+
   const [modalData, setModalData] = useState({
     experience_years: profile?.experience_years || '',
     current_job_title: profile?.current_job_title || '',
@@ -51,9 +44,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
   const [socialUrl, setSocialUrl] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
 
-  /**
-   * Available social media platforms
-   */
   const platforms = [
     { id: 'linkedin', name: 'LinkedIn', icon: FaLinkedin, color: 'text-blue-600', placeholder: 'https://linkedin.com/in/username' },
     { id: 'github', name: 'GitHub', icon: FaGithub, color: 'text-gray-800', placeholder: 'https://github.com/username' },
@@ -66,19 +56,12 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
     { id: 'portfolio', name: 'Portfolio', icon: FaGlobe, color: 'text-green-600', placeholder: 'https://your-portfolio.com' }
   ];
 
-  /**
-   * Handle basic field input changes
-   * @param {Event} e - Input change event
-   */
   const handleInputChange = (e) => {
     setModalData({ ...modalData, [e.target.name]: e.target.value });
   };
 
   const socialLinks = modalData.social_links || {};
 
-  /**
-   * Add a new social link to the profile
-   */
   const addSocialLink = () => {
     if (selectedPlatform && socialUrl && socialUrl.trim()) {
       const platformId = selectedPlatform;
@@ -90,18 +73,12 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
         ...modalData,
         social_links: updatedLinks
       });
-
-      // Reset form
       setSelectedPlatform('');
       setSocialUrl('');
       setShowAddForm(false);
     }
   };
 
-  /**
-   * Remove a social link from the profile
-   * @param {string} platformId - Platform identifier
-   */
   const removeSocialLink = (platformId) => {
     const updatedLinks = { ...socialLinks };
     delete updatedLinks[platformId];
@@ -111,11 +88,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
     });
   };
 
-  /**
-   * Get platform details by ID
-   * @param {string} platformId - Platform identifier
-   * @returns {Object} Platform details
-   */
   const getPlatformDetails = (platformId) => {
     return platforms.find(p => p.id === platformId) || {
       name: platformId,
@@ -124,32 +96,27 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
     };
   };
 
-  /**
-   * Save professional information to server
-   * Sends PATCH request to update endpoint
-   */
   const handleSave = async () => {
     setSaving(true);
 
     try {
-      const response = await fetch(route('backend.applicant.profile.update-professional-info', profile.id), {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
+      const response = await axios.patch(
+        `/api/applicant-profiles/${profile.id}/update-professional-info`,
+        {
           experience_years: modalData.experience_years,
           current_job_title: modalData.current_job_title,
           social_links: modalData.social_links
-        })
-      });
+        },
+        {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          }
+        }
+      );
 
-      const responseData = await response.json();
-
-      if (responseData.success) {
+      if (response.data.success) {
         Swal.fire({
           icon: 'success',
           title: 'Updated!',
@@ -157,15 +124,15 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
           timer: 1500,
           showConfirmButton: false
         });
-        window.location.reload();
+        onClose();
       } else {
-        throw new Error(responseData.message || 'Failed to update');
+        throw new Error(response.data.message || 'Failed to update');
       }
     } catch (error) {
       Swal.fire({
         icon: 'error',
         title: 'Error!',
-        text: error.message || 'Failed to update professional information.',
+        text: error.response?.data?.message || error.message || 'Failed to update professional information.',
       });
     } finally {
       setSaving(false);
@@ -177,7 +144,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
   return (
     <Modal title="Edit Professional Information" onClose={onClose} onSave={handleSave} saving={saving}>
       <div className="space-y-6">
-        {/* Header */}
         <div className="border-b border-gray-200 pb-4">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-blue-100 rounded-lg">
@@ -190,7 +156,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
           </div>
         </div>
 
-        {/* Experience & Job Title */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -234,7 +199,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
           </div>
         </div>
 
-        {/* Social Links Section */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             <span className="flex items-center gap-2">
@@ -243,7 +207,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
             </span>
           </label>
 
-          {/* Existing Social Links */}
           {Object.keys(socialLinks).length > 0 && (
             <div className="space-y-2 mb-4">
               {Object.entries(socialLinks).map(([platformId, url]) => {
@@ -278,7 +241,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
             </div>
           )}
 
-          {/* Add Social Link Button / Form */}
           {!showAddForm ? (
             <button
               onClick={() => setShowAddForm(true)}
@@ -290,7 +252,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
           ) : (
             <div className="border border-gray-200 rounded-xl p-4 bg-gray-50">
               <div className="space-y-3">
-                {/* Platform Selection */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
                     Select Platform
@@ -309,7 +270,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
                   </select>
                 </div>
 
-                {/* URL Input */}
                 {selectedPlatform && (
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -325,7 +285,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
                   </div>
                 )}
 
-                {/* Action Buttons */}
                 <div className="flex gap-2">
                   <button
                     onClick={addSocialLink}
@@ -349,7 +308,6 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
             </div>
           )}
 
-          {/* Platform Info */}
           <div className="mt-3 p-3 bg-gray-50 rounded-lg">
             <p className="text-xs text-gray-500 mb-2">Popular platforms you can add:</p>
             <div className="flex flex-wrap gap-3">
@@ -370,6 +328,4 @@ const ProfessionalInfoModal = ({ isOpen, onClose, profile }) => {
       </div>
     </Modal>
   );
-};
-
-export default ProfessionalInfoModal;
+}
