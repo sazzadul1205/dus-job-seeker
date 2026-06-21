@@ -2,7 +2,7 @@
 
 // React
 import { useState } from 'react';
-import { Link, usePage } from '@inertiajs/react';
+import { Link, useLocation } from 'react-router-dom';
 
 // Icons
 import {
@@ -17,33 +17,22 @@ import {
 } from 'react-icons/fi';
 
 const JobSeekerLayout = ({ children }) => {
-  const { url, props } = usePage();
-  const { auth } = props;
-  const user = auth?.user;
-  const userName = user?.name || 'User';
-  const userEmail = user?.email || '';
-  const notificationMeta = props.notifications || { unread_count: 0, recent: [] };
+  const location = useLocation();
+  const pathname = location.pathname;
 
   // States for sidebar
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // Route helper
-  const route = (name, params = {}) => {
-    if (typeof window !== 'undefined' && window.route) {
-      try {
-        return window.route(name, params);
-      } catch (e) {
-        return '#';
-      }
-    }
-    return '#';
-  };
+  // Get user data from localStorage or context
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const userName = user?.name || 'User';
+  const userEmail = user?.email || '';
+  const notificationMeta = { unread_count: 0, recent: [] };
 
   // Normalize URL helper
   const normalizeUrl = (value) => {
     if (!value) return '';
-    const absolute = typeof value === 'string' ? value : value.toString();
-    const pathOnly = absolute.replace(/^https?:\/\/[^/]+/i, '');
+    const pathOnly = value.replace(/^https?:\/\/[^/]+/i, '');
     const withoutQueryOrHash = pathOnly.replace(/[?#].*$/, '');
     return withoutQueryOrHash.replace(/\/$/, '');
   };
@@ -51,69 +40,63 @@ const JobSeekerLayout = ({ children }) => {
   // Check if path is active
   const isPathActive = (path) => {
     if (!path || path === '#') return false;
-    const normalizedUrl = normalizeUrl(url);
+    const normalizedUrl = normalizeUrl(pathname);
     const normalizedPath = normalizeUrl(path);
     if (normalizedUrl === normalizedPath) return true;
     if (normalizedPath !== '/' && normalizedUrl.startsWith(normalizedPath)) return true;
     return false;
   };
 
-  // Check if route is active
-  const isRouteActive = (routeName, params = {}) => {
-    try {
-      const routeUrl = route(routeName, params);
-      if (routeUrl === '#') return false;
-      return normalizeUrl(url) === normalizeUrl(routeUrl);
-    } catch (e) {
-      return false;
-    }
-  };
-
   // Job Seeker Menu Items (No role conditions)
   const menuItems = [
     {
       name: 'Dashboard',
-      routeName: 'backend.dashboard',
+      path: '/dashboard',
       icon: FiHome,
       description: 'Overview & stats',
     },
     {
       name: 'Browse Jobs',
-      routeName: 'public.jobs.index',
+      path: '/jobs',
       icon: FiSearch,
       description: 'Find your next role',
     },
     {
       name: 'My Profile',
-      routeName: 'backend.applicant.profile.show',
+      path: '/profile',
       icon: FiUser,
       description: 'View & edit profile',
     },
     {
       name: 'My Applications',
-      routeName: 'backend.apply.index',
+      path: '/applications',
       icon: FiFileText,
       description: 'Track applications',
     },
     {
       name: 'Notifications',
-      routeName: 'backend.notifications.index',
+      path: '/notifications',
       icon: FiBell,
       badgeCount: notificationMeta.unread_count,
       description: 'Updates & alerts',
     },
   ];
 
+  // Handle logout
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.location.href = '/login';
+  };
+
   // Render menu item
   const renderMenuItem = (item) => {
-    const isActive = item.routeName
-      ? isRouteActive(item.routeName, item.routeParams || {})
-      : isPathActive(item.href);
+    const isActive = isPathActive(item.path);
 
     return (
       <Link
         key={item.name}
-        href={item.routeName ? route(item.routeName, item.routeParams || {}) : item.href}
+        to={item.path}
         className={`
           flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg transition-all duration-200 mb-1 relative group
           ${isActive
@@ -156,7 +139,7 @@ const JobSeekerLayout = ({ children }) => {
         {/* Logo Section */}
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
-            <Link href={route('home')} className="flex items-center gap-2 group">
+            <Link to="/" className="flex items-center gap-2 group">
               <div className="w-8 h-8 bg-linear-to-br from-green-600 to-green-700 rounded-lg flex items-center justify-center shadow-md group-hover:shadow-lg transition-all duration-200">
                 <FiBriefcase className="w-5 h-5 text-white" />
               </div>
@@ -211,15 +194,13 @@ const JobSeekerLayout = ({ children }) => {
                 </div>
               </div>
 
-              <Link
-                href={route('logout')}
-                method="post"
-                as="button"
+              <button
+                onClick={handleLogout}
                 className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200 group"
               >
                 <FiLogOut className="w-5 h-5 group-hover:scale-110 transition-transform duration-200" />
                 <span className="font-medium">Logout</span>
-              </Link>
+              </button>
             </>
           ) : (
             <div className="flex flex-col items-center gap-3">
@@ -232,15 +213,13 @@ const JobSeekerLayout = ({ children }) => {
                   Job Seeker
                 </div>
               </div>
-              <Link
-                href={route('logout')}
-                method="post"
-                as="button"
+              <button
+                onClick={handleLogout}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200 group"
                 title="Logout"
               >
                 <FiLogOut className="w-5 h-5 group-hover:scale-110 transition-transform duration-200" />
-              </Link>
+              </button>
             </div>
           )}
         </div>

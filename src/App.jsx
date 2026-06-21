@@ -1,7 +1,18 @@
 // React
 import { Suspense } from 'react';
 import { HelmetProvider } from 'react-helmet-async';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+
+// Pages
+import Login from "./pages/Auth/Login";
+import Register from './pages/Auth/Register';
+import AuthLayout from './Layout/AuthLayout';
+import ForgotPassword from './pages/Auth/ForgotPassword';
+import ResetPassword from './pages/Auth/ResetPassword';
+import VerifyEmail from './pages/Auth/VerifyEmail';
+import EmailVerified from './pages/Auth/EmailVerified';
+import ConfirmPassword from './pages/Auth/ConfirmPassword';
+import CompleteProfile from './pages/Auth/CompleteProfile';
 
 /**
  * LoadingSpinner - Shown while page data is being fetched
@@ -42,6 +53,19 @@ function App() {
       <Router> {/* React Router for navigation */}
         <Suspense fallback={<LoadingSpinner />}> {/* Handles lazy loading states */}
           <Routes>
+
+            <Route path="/" element={<Navigate to="/login" />} />
+            {/* Auth Routes using AuthLayout */}
+            <Route element={<AuthLayout />}>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password/:token" element={<ResetPassword />} />
+              <Route path="/verify-email" element={<VerifyEmail />} />
+              <Route path="/email-verified" element={<EmailVerified />} />
+              <Route path="/confirm-password" element={<ConfirmPassword />} />
+              <Route path="/profile/complete" element={<CompleteProfile />} />
+            </Route>
 
             {/* Catch-all route for 404 - must be last */}
             <Route path="*" element={<NotFound />} />

@@ -1,7 +1,10 @@
-// pages/auth/Steps/CVUpload.jsx
+// src/pages/Auth/CompleteProfileSteps/CVUpload.jsx
 
 // React
 import { useState, useEffect } from 'react';
+
+// Axios
+import axios from 'axios';
 
 // Icons
 import {
@@ -26,6 +29,7 @@ const CVUpload = ({ data, setData }) => {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
+  // Cleanup preview URLs on unmount
   useEffect(() => {
     return () => {
       data.cvs.forEach((cv) => {
@@ -34,7 +38,7 @@ const CVUpload = ({ data, setData }) => {
         }
       });
     };
-  }, []);
+  }, [data.cvs]);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -62,6 +66,8 @@ const CVUpload = ({ data, setData }) => {
     if (files && files[0]) {
       await uploadCV(files[0]);
     }
+    // Reset input value so same file can be uploaded again
+    e.target.value = '';
   };
 
   const uploadCV = async (file) => {
@@ -103,46 +109,48 @@ const CVUpload = ({ data, setData }) => {
       const formData = new FormData();
       formData.append('cv', file);
 
-      const response = await fetch(route('profile.cv.upload'), {
-        method: 'POST',
-        body: formData,
+      const response = await axios.post('/api/profile/cv/upload', formData, {
         headers: {
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
           'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Content-Type': 'multipart/form-data',
         },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.message || 'Upload failed');
-      }
-
-      const result = await response.json();
+      const result = response.data;
       const previewUrl = URL.createObjectURL(file);
 
       const newCv = {
-        id: result.id,
-        name: result.original_name,
-        size: result.size,
-        type: result.type,
+        id: result.id || Date.now(),
+        name: result.original_name || file.name,
+        size: result.size || file.size,
+        type: result.type || file.type,
         preview_url: previewUrl,
-        original_name: result.original_name,
-        order_position: result.order_position,
-        is_primary: result.is_primary,
+        original_name: result.original_name || file.name,
+        order_position: result.order_position || data.cvs.length,
+        is_primary: result.is_primary || data.cvs.length === 0,
         upload_date: result.upload_date || new Date().toISOString(),
-        status: result.status,
-        cv_path: result.cv_path,
+        status: result.status || 'pending',
+        cv_path: result.cv_path || null,
         url: result.url || null,
       };
 
       setData('cvs', [...data.cvs, newCv]);
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Upload Successful!',
+        text: 'Your CV has been uploaded successfully.',
+        timer: 1500,
+        showConfirmButton: false,
+      });
 
     } catch (error) {
       console.error('Upload error:', error);
       Swal.fire({
         icon: 'error',
         title: 'Upload Failed',
-        text: error.message || 'Something went wrong while uploading the file.',
+        text: error.response?.data?.message || 'Something went wrong while uploading the file.',
       });
     } finally {
       setUploading(false);
@@ -157,25 +165,34 @@ const CVUpload = ({ data, setData }) => {
       showCancelButton: true,
       confirmButtonColor: '#d33',
       cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Yes, remove it!'
+      confirmButtonText: 'Yes, remove it!',
+      cancelButtonText: 'Cancel'
     }).then(async (result) => {
       if (result.isConfirmed) {
         const cvToRemove = data.cvs[index];
-        if (cvToRemove?.id) {
-          await fetch(route('profile.cv.destroy', cvToRemove.id), {
-            method: 'DELETE',
-            headers: {
-              'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-              'X-Requested-With': 'XMLHttpRequest',
-            },
-          });
+
+        // If the CV has an ID and was uploaded to server, delete it
+        if (cvToRemove?.id && cvToRemove?.cv_path) {
+          try {
+            await axios.delete(`/api/profile/cv/${cvToRemove.id}`, {
+              headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+              },
+            });
+          } catch (error) {
+            console.error('Error deleting CV from server:', error);
+            // Continue with removal even if server delete fails
+          }
         }
 
+        // Revoke object URL to prevent memory leaks
         if (cvToRemove?.preview_url) {
           URL.revokeObjectURL(cvToRemove.preview_url);
         }
 
         const newCVs = data.cvs.filter((_, i) => i !== index);
+        // Reorder positions
         newCVs.forEach((cv, idx) => {
           cv.order_position = idx;
         });
@@ -200,14 +217,29 @@ const CVUpload = ({ data, setData }) => {
     setData('cvs', newCVs);
 
     const cv = data.cvs[index];
-    if (cv?.id) {
-      await fetch(route('profile.cv.primary', cv.id), {
-        method: 'PATCH',
-        headers: {
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-      });
+    if (cv?.id && cv?.cv_path) {
+      try {
+        await axios.patch(`/api/profile/cv/${cv.id}/primary`, {}, {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+          },
+        });
+      } catch (error) {
+        console.error('Error setting primary CV:', error);
+        // Revert the change if server update fails
+        const revertCVs = data.cvs.map((c, idx) => ({
+          ...c,
+          is_primary: idx === 0 // Revert to first CV being primary
+        }));
+        setData('cvs', revertCVs);
+
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to Update',
+          text: 'Could not set primary CV. Please try again.',
+        });
+      }
     }
   };
 
@@ -262,7 +294,9 @@ const CVUpload = ({ data, setData }) => {
       {/* Drag & Drop Area - Disabled when max CVs reached */}
       {data.cvs.length < MAX_CVS ? (
         <div
-          className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 ${dragActive ? 'border-blue-500 bg-blue-50 scale-[1.01]' : 'border-gray-300 bg-gray-50'
+          className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 ${dragActive
+              ? 'border-blue-500 bg-blue-50 scale-[1.01]'
+              : 'border-gray-300 bg-gray-50 hover:bg-gray-100'
             }`}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
@@ -274,6 +308,7 @@ const CVUpload = ({ data, setData }) => {
             accept=".pdf,.doc,.docx"
             onChange={handleFileSelect}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            disabled={uploading}
           />
           <div className="flex flex-col items-center">
             <div className="p-4 bg-white rounded-full shadow-md mb-3">
@@ -319,13 +354,16 @@ const CVUpload = ({ data, setData }) => {
           </div>
 
           {data.cvs.map((cv, index) => (
-            <div key={cv.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:shadow-md transition-all duration-200">
+            <div
+              key={cv.id}
+              className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:shadow-md transition-all duration-200"
+            >
               <div className="flex items-center space-x-3">
-                {getFileIcon(cv.original_name)}
+                {getFileIcon(cv.original_name || cv.name)}
                 <div>
-                  <p className="font-medium text-gray-900">{cv.original_name}</p>
+                  <p className="font-medium text-gray-900">{cv.original_name || cv.name}</p>
                   <p className="text-xs text-gray-500">
-                    {formatFileSize(cv.size)} • {new Date(cv.upload_date).toLocaleDateString()}
+                    {formatFileSize(cv.size)} • {cv.upload_date ? new Date(cv.upload_date).toLocaleDateString() : 'Recently uploaded'}
                   </p>
                   <p className="text-sm text-gray-500 flex items-center gap-1 mt-1">
                     {cv.is_primary ? (
@@ -343,7 +381,7 @@ const CVUpload = ({ data, setData }) => {
                 </div>
               </div>
               <div className="flex items-center space-x-2">
-                {!cv.is_primary && (
+                {!cv.is_primary && data.cvs.length > 1 && (
                   <button
                     onClick={() => setPrimaryCV(index)}
                     className="flex items-center gap-1 px-3 py-1.5 text-sm bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors duration-200"
@@ -355,6 +393,7 @@ const CVUpload = ({ data, setData }) => {
                 <button
                   onClick={() => removeCV(index)}
                   className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors duration-200"
+                  title="Remove CV"
                 >
                   <FaTrashAlt className="h-4 w-4" />
                 </button>

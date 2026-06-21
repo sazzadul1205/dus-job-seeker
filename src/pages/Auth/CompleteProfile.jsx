@@ -1,11 +1,11 @@
-// pages/auth/completeProfile.jsx
+// src/pages/Auth/JobSeeker/CompleteProfile.jsx
 
-// React
-import { useForm } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
-import { Head, router } from '@inertiajs/react';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
+import axios from 'axios';
 
-// sweetalert2
+// SweetAlert2
 import Swal from 'sweetalert2';
 
 // Icons
@@ -22,28 +22,38 @@ import {
   FaTrophy,
   FaEye,
   FaUser,
-  FaSave
 } from 'react-icons/fa';
 import { MdWork } from 'react-icons/md';
 
 // Step Components
-import CVUpload from './Steps/CVUpload';
-import Education from './Steps/Education';
-import BasicInfo from './Steps/BasicInfo';
-import ReviewPage from './Steps/ReviewPage';
-import Achievements from './Steps/Achievements';
-import WorkExperience from './Steps/WorkExperience';
-import ProfessionalInfo from './Steps/ProfessionalInfo';
+import CVUpload from './CompleteProfileSteps/CVUpload';
+import Education from './CompleteProfileSteps/Education';
+import BasicInfo from './CompleteProfileSteps/BasicInfo';
+import ReviewPage from './CompleteProfileSteps/ReviewPage';
+import Achievements from './CompleteProfileSteps/Achievements';
+import WorkExperience from './CompleteProfileSteps/WorkExperience';
+import ProfessionalInfo from './CompleteProfileSteps/ProfessionalInfo';
 
 const CompleteProfile = ({ applicantProfile = null }) => {
+  const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
-  const [isSaving, setIsSaving] = useState(false);
-  const [uploadedPhotoUrl, setUploadedPhotoUrl] = useState(null);
+  const [processing, setProcessing] = useState(false);
   // Track which steps have been completed
   const [completedSteps, setCompletedSteps] = useState(new Set());
 
+  // Define steps BEFORE any useCallback hooks that reference them
+  const steps = [
+    { name: 'Basic Info', component: BasicInfo, icon: FaUser, required: true },
+    { name: 'Professional', component: ProfessionalInfo, icon: MdWork, required: false },
+    { name: 'CV Upload', component: CVUpload, icon: FaFileAlt, required: false },
+    { name: 'Work Experience', component: WorkExperience, icon: FaBriefcase, required: false },
+    { name: 'Education', component: Education, icon: FaGraduationCap, required: false },
+    { name: 'Achievements', component: Achievements, icon: FaTrophy, required: false },
+    { name: 'Review', component: ReviewPage, icon: FaEye, required: false },
+  ];
+
   // Initialize form data
-  const { data, setData, post, processing, errors } = useForm({
+  const [data, setData] = useState({
     // Basic Info
     first_name: '',
     last_name: '',
@@ -73,21 +83,39 @@ const CompleteProfile = ({ applicantProfile = null }) => {
     achievements: [],
   });
 
+  // Save data to localStorage whenever it changes
+  const saveToLocalStorage = useCallback((dataToSave) => {
+    try {
+      const saveData = { ...dataToSave };
+      // Don't save File objects
+      if (saveData.photo instanceof File) {
+        saveData.photo = null;
+      }
+      localStorage.setItem('profile_form_data', JSON.stringify(saveData));
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+    }
+  }, []);
+
   // Load data from localStorage on mount
   useEffect(() => {
     const savedData = localStorage.getItem('profile_form_data');
     if (savedData) {
       try {
         const parsedData = JSON.parse(savedData);
-        Object.entries(parsedData).forEach(([key, value]) => {
-          if (key !== 'photo' && key !== 'cvs') {
-            setData(key, value);
-          } else if (key === 'cvs') {
-            setData('cvs', value);
-          } else if (key === 'photo_path') {
-            setData('photo_path', value);
-          }
-        });
+        // Don't restore File objects
+        const filteredData = { ...parsedData };
+        delete filteredData.photo;
+
+        // Use a timeout to avoid cascading renders
+        const timer = setTimeout(() => {
+          setData(prev => ({
+            ...prev,
+            ...filteredData,
+            photo: null,
+          }));
+        }, 0);
+        return () => clearTimeout(timer);
       } catch (error) {
         console.error('Error loading saved data:', error);
       }
@@ -96,7 +124,7 @@ const CompleteProfile = ({ applicantProfile = null }) => {
 
   // Load applicant profile data when available
   useEffect(() => {
-    if (applicantProfile?.id) {
+    if (applicantProfile && applicantProfile.id) {
       const nextData = {
         first_name: applicantProfile.first_name || '',
         last_name: applicantProfile.last_name || '',
@@ -116,55 +144,23 @@ const CompleteProfile = ({ applicantProfile = null }) => {
         achievements: applicantProfile.achievements || [],
       };
 
-      Object.entries(nextData).forEach(([key, value]) => {
-        setData(key, value);
-      });
-
-      // Save to localStorage
-      saveToLocalStorage(nextData);
+      // Use a timeout to avoid cascading renders
+      const timer = setTimeout(() => {
+        setData(nextData);
+        saveToLocalStorage(nextData);
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [applicantProfile?.id]);
-
-  // Save data to localStorage whenever it changes
-  const saveToLocalStorage = (dataToSave) => {
-    try {
-      const saveData = { ...dataToSave };
-      // Don't save File objects
-      if (saveData.photo instanceof File) {
-        saveData.photo = null;
-      }
-      localStorage.setItem('profile_form_data', JSON.stringify(saveData));
-    } catch (error) {
-      console.error('Error saving to localStorage:', error);
-    }
-  };
+  }, [applicantProfile, saveToLocalStorage]);
 
   // Wrapper for setData that also saves to localStorage
-  const handleSetData = (key, value) => {
-    setData(key, value);
-    const newData = { ...data, [key]: value };
-    saveToLocalStorage(newData);
-  };
-
-  // Manual save function
-  const handleSaveProgress = () => {
-    setIsSaving(true);
-    saveToLocalStorage(data);
-    setTimeout(() => {
-      setIsSaving(false);
-      Swal.fire({
-        icon: 'success',
-        title: 'Progress Saved!',
-        text: 'Your progress has been saved locally.',
-        timer: 1500,
-        showConfirmButton: false,
-        background: '#ffffff',
-        customClass: {
-          popup: 'rounded-2xl'
-        }
-      });
-    }, 500);
-  };
+  const handleSetData = useCallback((key, value) => {
+    setData(prev => {
+      const newData = { ...prev, [key]: value };
+      saveToLocalStorage(newData);
+      return newData;
+    });
+  }, [saveToLocalStorage]);
 
   // Handle photo upload
   const handlePhotoUpload = async (file) => {
@@ -174,22 +170,18 @@ const CompleteProfile = ({ applicantProfile = null }) => {
     formData.append('photo', file);
 
     try {
-      const response = await fetch(route('profile.photo.upload'), {
-        method: 'POST',
-        body: formData,
+      const response = await axios.post('/api/profile/photo/upload', formData, {
         headers: {
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
           'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json',
+          'Content-Type': 'multipart/form-data',
         },
       });
 
-      if (!response.ok) {
-        throw new Error('Photo upload failed');
+      if (response.data.photo_url) {
+        return response.data.photo_path;
       }
-
-      const result = await response.json();
-      setUploadedPhotoUrl(result.photo_url);
-      return result.photo_path;
+      return null;
     } catch (error) {
       console.error('Photo upload error:', error);
       Swal.fire({
@@ -204,8 +196,8 @@ const CompleteProfile = ({ applicantProfile = null }) => {
 
   // ==================== STEP VALIDATION FUNCTIONS ====================
 
-  // Validate Basic Info step (Step 0)
-  const validateBasicInfo = () => {
+  // Validate Basic Info step (Step 0) - REQUIRED
+  const validateBasicInfo = useCallback(() => {
     const errors = [];
     if (!data.first_name?.trim()) errors.push('First name is required');
     if (!data.last_name?.trim()) errors.push('Last name is required');
@@ -213,76 +205,35 @@ const CompleteProfile = ({ applicantProfile = null }) => {
       errors.push('Phone number is required');
     }
     return errors;
-  };
+  }, [data.first_name, data.last_name, data.phone]);
 
-  // Validate Professional Info step (Step 1)
-  const validateProfessionalInfo = () => {
-    const errors = [];
-    // All fields are optional, so no validation needed
-    return errors;
-  };
+  // Validate Professional Info step (Step 1) - OPTIONAL
+  const validateProfessionalInfo = useCallback(() => {
+    return [];
+  }, []);
 
-  // Validate CV Upload step (Step 2)
-  const validateCVUpload = () => {
-    const errors = [];
-    if (!data.cvs || data.cvs.length === 0) {
-      errors.push('Please upload at least one CV');
-    }
-    return errors;
-  };
+  // Validate CV Upload step (Step 2) - OPTIONAL
+  const validateCVUpload = useCallback(() => {
+    return [];
+  }, []);
 
-  // Validate Work Experience step (Step 3)
-  const validateWorkExperience = () => {
-    const errors = [];
-    // Work experience is optional, but check for incomplete entries
-    if (data.job_histories && data.job_histories.length > 0) {
-      data.job_histories.forEach((job, index) => {
-        if (!job.company_name?.trim() && !job.position?.trim()) {
-          // Both empty - this is fine, they might be filling it out
-        } else if (!job.company_name?.trim()) {
-          errors.push(`Experience #${index + 1}: Company name is required`);
-        } else if (!job.position?.trim()) {
-          errors.push(`Experience #${index + 1}: Position is required`);
-        }
-      });
-    }
-    return errors;
-  };
+  // Validate Work Experience step (Step 3) - OPTIONAL
+  const validateWorkExperience = useCallback(() => {
+    return [];
+  }, []);
 
-  // Validate Education step (Step 4)
-  const validateEducation = () => {
-    const errors = [];
-    if (data.education_histories && data.education_histories.length > 0) {
-      data.education_histories.forEach((edu, index) => {
-        if (!edu.institution_name?.trim() && !edu.degree?.trim()) {
-          // Both empty - this is fine
-        } else if (!edu.institution_name?.trim()) {
-          errors.push(`Education #${index + 1}: Institution name is required`);
-        } else if (!edu.degree?.trim()) {
-          errors.push(`Education #${index + 1}: Degree is required`);
-        }
-      });
-    }
-    return errors;
-  };
+  // Validate Education step (Step 4) - OPTIONAL
+  const validateEducation = useCallback(() => {
+    return [];
+  }, []);
 
-  // Validate Achievements step (Step 5)
-  const validateAchievements = () => {
-    const errors = [];
-    if (data.achievements && data.achievements.length > 0) {
-      data.achievements.forEach((ach, index) => {
-        if (!ach.achievement_name?.trim() && !ach.achievement_details?.trim()) {
-          // Both empty - this is fine
-        } else if (!ach.achievement_name?.trim()) {
-          errors.push(`Achievement #${index + 1}: Title is required`);
-        }
-      });
-    }
-    return errors;
-  };
+  // Validate Achievements step (Step 5) - OPTIONAL
+  const validateAchievements = useCallback(() => {
+    return [];
+  }, []);
 
   // Main validation function for a step
-  const validateStep = (stepIndex) => {
+  const validateStep = useCallback((stepIndex) => {
     let errors = [];
     switch (stepIndex) {
       case 0:
@@ -307,24 +258,17 @@ const CompleteProfile = ({ applicantProfile = null }) => {
         break;
     }
     return errors;
-  };
+  }, [validateBasicInfo, validateProfessionalInfo, validateCVUpload, validateWorkExperience, validateEducation, validateAchievements]);
 
   // Check if a step is completed successfully
-  const isStepCompleted = (stepIndex) => {
+  const isStepCompleted = useCallback((stepIndex) => {
     const errors = validateStep(stepIndex);
     return errors.length === 0;
-  };
-
-  // Mark current step as completed when valid
-  const markCurrentStepCompleted = () => {
-    if (isStepCompleted(currentStep)) {
-      setCompletedSteps(prev => new Set([...prev, currentStep]));
-    }
-  };
+  }, [validateStep]);
 
   // ==================== NAVIGATION FUNCTIONS ====================
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     // Validate current step before proceeding
     const errors = validateStep(currentStep);
 
@@ -333,9 +277,9 @@ const CompleteProfile = ({ applicantProfile = null }) => {
         icon: 'warning',
         title: 'Please Complete This Step',
         html: `
-          <div class="text-left">
-            <p class="text-gray-700 mb-2">Please fix the following before proceeding:</p>
-            <ul class="text-sm text-red-600 space-y-1">
+          <div className="text-left">
+            <p className="text-gray-700 mb-2">Please fix the following before proceeding:</p>
+            <ul className="text-sm text-red-600 space-y-1">
               ${errors.map(err => `<li>• ${err}</li>`).join('')}
             </ul>
           </div>
@@ -355,32 +299,28 @@ const CompleteProfile = ({ applicantProfile = null }) => {
       setCurrentStep(currentStep + 1);
       window.scrollTo(0, 0);
     }
-  };
+  }, [currentStep, data, saveToLocalStorage, validateStep, steps.length]);
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     if (currentStep > 0) {
       saveToLocalStorage(data);
       setCurrentStep(currentStep - 1);
       window.scrollTo(0, 0);
     }
-  };
+  }, [currentStep, data, saveToLocalStorage]);
 
-  const handleEditStep = (stepIndex) => {
-    // Allow going to any completed step or current step
+  const handleEditStep = useCallback((stepIndex) => {
     const isCurrentStep = stepIndex === currentStep;
     const isCompleted = completedSteps.has(stepIndex);
     const isPreviousStep = stepIndex < currentStep;
 
-    // Check if step index is valid
     if (stepIndex < 0 || stepIndex >= steps.length) return;
 
-    // Can only go to current step, completed steps, or previous steps
     if (isCurrentStep || isCompleted || isPreviousStep) {
       saveToLocalStorage(data);
       setCurrentStep(stepIndex);
       window.scrollTo(0, 0);
     } else {
-      // Show warning that they need to complete previous steps
       Swal.fire({
         icon: 'info',
         title: 'Step Locked',
@@ -389,26 +329,39 @@ const CompleteProfile = ({ applicantProfile = null }) => {
         confirmButtonText: 'Got it'
       });
     }
-  };
+  }, [currentStep, completedSteps, steps.length, saveToLocalStorage, data]);
 
-  // Determine if a step is accessible from the ribbon
-  const isStepAccessible = (index) => {
+  const isStepAccessible = useCallback((index) => {
     if (index === currentStep) return true;
     if (completedSteps.has(index)) return true;
     if (index < currentStep) return true;
     return false;
-  };
+  }, [currentStep, completedSteps]);
 
   // ==================== HANDLE SUBMIT ====================
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
+    // Check if Basic Info is filled (required)
+    if (!data.first_name || !data.last_name || !data.phone) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Missing Required Info',
+        text: 'Please fill in First Name, Last Name, and Phone before submitting.',
+        confirmButtonColor: '#ef4444',
+      });
+      return;
+    }
+
     Swal.fire({
       title: 'Submit Profile?',
       html: `
-        <div class="text-left">
-          <p class="text-gray-700">Are you sure you want to submit your profile?</p>
-          <p class="text-sm text-gray-500 mt-3 pt-2 border-t border-gray-100">
-            <span class="flex items-center gap-1">📄 Your CVs are already uploaded.</span>
-            <span class="flex items-center gap-1 mt-1">✏️ You can still edit your profile later from your dashboard.</span>
+        <div className="text-left">
+          <p className="text-gray-700">Are you sure you want to submit your profile?</p>
+          <p className="text-sm text-gray-500 mt-3 pt-2 border-t border-gray-100">
+            <span className="flex items-center gap-1">📄 Your CVs are already uploaded.</span>
+            <span className="flex items-center gap-1 mt-1">✏️ You can still edit your profile later from your dashboard.</span>
+          </p>
+          <p className="text-sm text-gray-500 mt-2">
+            ⚠️ Only Basic Information is required. Other sections are optional.
           </p>
         </div>
       `,
@@ -426,15 +379,7 @@ const CompleteProfile = ({ applicantProfile = null }) => {
       }
     }).then(async (result) => {
       if (result.isConfirmed) {
-        if (!data.first_name || !data.last_name || !data.phone) {
-          Swal.fire({
-            icon: 'error',
-            title: 'Missing Required Info',
-            text: 'Please fill in First Name, Last Name, and Phone before submitting.',
-            confirmButtonColor: '#ef4444',
-          });
-          return;
-        }
+        setProcessing(true);
 
         // Upload photo separately if it exists and is a new file
         let photoPath = data.photo_path;
@@ -462,24 +407,33 @@ const CompleteProfile = ({ applicantProfile = null }) => {
         // Remove the actual File object from submission
         delete submitData.photo;
 
-        post('/profile/complete', {
-          data: submitData,
-          onSuccess: () => {
+        try {
+          const response = await axios.post('/api/profile/complete', submitData, {
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            }
+          });
+
+          if (response.data.success) {
             localStorage.removeItem('profile_form_data');
+            setProcessing(false);
+
             Swal.fire({
               icon: 'success',
               title: 'Profile Submitted!',
               html: `
-                <div class="text-center">
-                  <div class="flex justify-center mb-3">
-                    <div class="p-3 bg-green-100 rounded-full">
-                      <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                <div className="text-center">
+                  <div className="flex justify-center mb-3">
+                    <div className="p-3 bg-green-100 rounded-full">
+                      <svg className="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
                       </svg>
                     </div>
                   </div>
-                  <p class="text-gray-700">Your profile has been successfully submitted!</p>
-                  <p class="text-sm text-gray-500 mt-2">Redirecting to dashboard...</p>
+                  <p className="text-gray-700">Your profile has been successfully submitted!</p>
+                  <p className="text-sm text-gray-500 mt-2">Redirecting to dashboard...</p>
                 </div>
               `,
               timer: 3000,
@@ -489,34 +443,25 @@ const CompleteProfile = ({ applicantProfile = null }) => {
                 popup: 'rounded-2xl'
               }
             }).then(() => {
-              router.visit('/dashboard');
-            });
-          },
-          onError: (errors) => {
-            Swal.fire({
-              icon: 'error',
-              title: 'Submission Failed',
-              text: Object.values(errors).flat().join('\n') || 'Something went wrong. Please try again.',
-              confirmButtonColor: '#ef4444',
-              customClass: {
-                popup: 'rounded-2xl'
-              }
+              navigate('/dashboard');
             });
           }
-        });
+        } catch (error) {
+          setProcessing(false);
+          const errorMessage = error.response?.data?.message || 'Something went wrong. Please try again.';
+          Swal.fire({
+            icon: 'error',
+            title: 'Submission Failed',
+            text: errorMessage,
+            confirmButtonColor: '#ef4444',
+            customClass: {
+              popup: 'rounded-2xl'
+            }
+          });
+        }
       }
     });
-  };
-
-  const steps = [
-    { name: 'Basic Info', component: BasicInfo, icon: FaUser },
-    { name: 'Professional', component: ProfessionalInfo, icon: MdWork },
-    { name: 'CV Upload', component: CVUpload, icon: FaFileAlt },
-    { name: 'Work Experience', component: WorkExperience, icon: FaBriefcase },
-    { name: 'Education', component: Education, icon: FaGraduationCap },
-    { name: 'Achievements', component: Achievements, icon: FaTrophy },
-    { name: 'Review', component: ReviewPage, icon: FaEye },
-  ];
+  }, [data, navigate]);
 
   const CurrentStepComponent = steps[currentStep].component;
 
@@ -525,15 +470,21 @@ const CompleteProfile = ({ applicantProfile = null }) => {
 
   // Mark step as completed when it's valid (on each render)
   useEffect(() => {
-    // Don't auto-mark review page
     if (!isReviewPage && isStepCompleted(currentStep)) {
-      setCompletedSteps(prev => new Set([...prev, currentStep]));
+      // Use a timeout to avoid cascading renders
+      const timer = setTimeout(() => {
+        setCompletedSteps(prev => new Set([...prev, currentStep]));
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [data, currentStep]);
+  }, [data, currentStep, isReviewPage, isStepCompleted]);
 
   return (
     <div className="min-h-screen bg-linear-to-br from-gray-50 to-gray-100 py-8 text-black">
-      <Head title="Complete Your Profile" />
+      <Helmet>
+        <title>Complete Your Profile</title>
+        <meta name="description" content="Complete your Job Match profile to start applying for jobs" />
+      </Helmet>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8 text-center flex mx-auto items-center justify-center gap-4">
@@ -561,10 +512,10 @@ const CompleteProfile = ({ applicantProfile = null }) => {
           <div className="mb-8 bg-white rounded-xl p-4 shadow-sm">
             <div className="flex justify-between mb-3">
               {steps.slice(0, -1).map((step, index) => {
-                const Icon = step.icon;
                 const isCompleted = completedSteps.has(index);
                 const isActive = index === currentStep;
                 const isAccessible = isStepAccessible(index);
+                const isRequired = step.required;
 
                 return (
                   <div
@@ -591,6 +542,13 @@ const CompleteProfile = ({ applicantProfile = null }) => {
                       }`}>
                       {step.name}
                     </span>
+                    <span className="text-[8px] mt-0.5">
+                      {isRequired ? (
+                        <span className="text-red-500">Required</span>
+                      ) : (
+                        <span className="text-gray-400">Optional</span>
+                      )}
+                    </span>
                     {!isAccessible && (
                       <span className="text-[8px] text-gray-400 mt-0.5">🔒</span>
                     )}
@@ -604,9 +562,8 @@ const CompleteProfile = ({ applicantProfile = null }) => {
                 style={{ width: `${progressPercentage}%` }}
               />
             </div>
-            {/* Step indicator text */}
             <div className="flex justify-between mt-2 text-xs text-gray-400">
-              <span>Required</span>
+              <span className="text-red-500">* Required</span>
               <span>Optional</span>
             </div>
           </div>
@@ -620,7 +577,7 @@ const CompleteProfile = ({ applicantProfile = null }) => {
             <CurrentStepComponent
               data={data}
               setData={handleSetData}
-              errors={errors}
+              errors={{}}
             />
           )}
 
